@@ -281,3 +281,5 @@ body.kb-open .tabbar { display: none; }
 .btn.big { height: 56px; font-size: 17px; }
 .btn svg { width: 18px; height: 18px; flex-shrink: 0; }
 .banner svg, .icon-btn svg { flex-shrink: 0; }
+/* MapLibre kendi stilinde konteyneri "position: relative" yapıyor; yüksekliği açıkça ver */
+.map-wrap > .map, .map-wrap > .map.maplibregl-map { position: absolute !important; top: 0; left: 0; width: 100%; height: 100% !important; }

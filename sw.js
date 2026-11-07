@@ -1,5 +1,5 @@
 // Tayfa servis çalışanı: çevrimdışı kabuk + bildirimler
-const CACHE = 'tayfa-v2.0.0';
+const CACHE = 'tayfa-v2.0.1';
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'config.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'aydinlatma.html',
   'anilar.js', 'sohbet.js', 'oyunlar.js', 'e2e.js', 'supabase/functions/_shared/tavla.js'];

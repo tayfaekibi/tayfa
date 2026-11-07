@@ -101,6 +101,8 @@ async function drawMap() {
   if (map) { try { map.remove(); } catch (_) { /* */ } }
   map = new ml.Map({ container: 'map', style: MAP_STYLE, center: TR_CENTER, zoom: 4.6, attributionControl: { compact: true } });
   map.touchPitch?.disable?.(); map.dragRotate.disable(); map.touchZoomRotate.disableRotation();
+  map.on('load', () => map.resize());
+  setTimeout(() => map && map.resize(), 300);
   const pts = A.albums.filter((a) => a.lat != null && a.lng != null);
   const url = await signed(pts.map((a) => a.cover_thumb));
   for (const a of pts) {
@@ -468,6 +470,7 @@ async function pickLocation(album, onPick) {
     const center = album.lat != null ? [album.lng, album.lat] : TR_CENTER;
     const m = new ml.Map({ container: 'pick-map', style: MAP_STYLE, center, zoom: album.lat != null ? 10 : 4.6, attributionControl: { compact: true } });
     m.dragRotate.disable(); m.touchZoomRotate.disableRotation();
+    m.on('load', () => m.resize()); setTimeout(() => m.resize(), 300);
     let mk = null, ll = null;
     m.on('click', (e) => {
       ll = e.lngLat;
