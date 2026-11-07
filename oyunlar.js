@@ -4,6 +4,7 @@ import {
   me, nameOf, activeMembers, header, bindHeader, goMain, updateTabDots,
 } from './app.js';
 import * as T from './supabase/functions/_shared/tavla.js';
+import * as Sohbet from './sohbet.js';
 
 const G = { games: [], game: null, channel: null, done: [], sel: null, busy: false };
 
@@ -101,8 +102,10 @@ export async function renderGame() {
   document.getElementById('g-back').onclick = () => { closeGame(); goMain('game'); };
   document.getElementById('g-menu').onclick = gameMenu;
   await reloadGame();
+  if (G.game) Sohbet.gameChatLoad(G.game, () => drawChatBar()).then(drawChatBar).catch((e) => console.warn(e));
   if (G.channel) sb.removeChannel(G.channel);
   G.channel = sb.channel('oyun-' + S.gameId)
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `game_id=eq.${S.gameId}` }, ({ new: m }) => Sohbet.gameChatIncoming(m))
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'games', filter: `id=eq.${S.gameId}` }, ({ new: g }) => {
       const turnChanged = G.game?.turn !== g.turn || JSON.stringify(G.game?.state?.dice) !== JSON.stringify(g.state?.dice);
       G.game = g;
@@ -153,6 +156,13 @@ function gameMenu() {
 // beyazın bakışıyla: üst sıra soldan sağa 12..23, alt sıra soldan sağa 11..0
 const TOP = [12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23];
 const BOTTOM = [11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
+
+function drawChatBar() {
+  const box = document.getElementById('g-chatbar'); if (!box || !G.game) return;
+  const { last, unread } = Sohbet.gameChatSummary();
+  box.innerHTML = `<button class="gc-bar" id="g-chat">${svg('chat')}<span class="grow">${last ? esc(last) : 'Rakibinle sohbet et'}</span>${unread ? `<b class="gc-n">${unread}</b>` : ''}</button>`;
+  document.getElementById('g-chat').onclick = () => Sohbet.openGameChat(G.game);
+}
 
 function drawGame() {
   const box = document.getElementById('g-body'); const g = G.game;
@@ -234,7 +244,9 @@ function drawGame() {
     </div>
     ${lastInfo && !rolled ? `<p class="small" style="text-align:center">${lastInfo}</p>` : ''}
     ${status}
-    ${myTurn && rolled && legal.maxLen === 0 ? '<p class="small" style="text-align:center">Oynanacak hamle yok.</p>' : ''}`;
+    ${myTurn && rolled && legal.maxLen === 0 ? '<p class="small" style="text-align:center">Oynanacak hamle yok.</p>' : ''}
+    ${p >= 0 ? '<div id="g-chatbar"></div>' : ''}`;
+  drawChatBar();
 
   document.getElementById('g-roll')?.addEventListener('click', () => call('roll'));
   document.getElementById('g-undo')?.addEventListener('click', () => { G.done.pop(); G.sel = null; drawGame(); });

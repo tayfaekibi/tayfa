@@ -202,7 +202,7 @@ async function placeSheet(place) {
   const title = place.album ? place.album.title : (photos.length > 1 ? `${photos.length} fotoğraf` : 'Fotoğraf');
   const sub = place.album ? `${dateTr(place.album.taken_on)} · ${place.album.photo_count} fotoğraf` : 'Bu konumdaki tek fotoğraflar';
   openSheet(`${sheetHead(esc(title))}<p class="sub">${esc(sub)}</p><div id="ps-grid"><p class="small">Yükleniyor…</p></div>
-    ${place.album ? `<button class="btn block" id="ps-open">${svg('grid')}Albümü aç · yorumlar</button>` : ''}`, async () => {
+    ${place.album ? `<button class="btn block" id="ps-open">${svg('grid')}Albümü aç</button>` : ''}`, async () => {
     document.getElementById('ps-open')?.addEventListener('click', () => { closeSheet(); openAlbum(place.album.id); });
     try {
       if (!photos) {
@@ -281,8 +281,7 @@ async function drawAlbum() {
       <button class="photo-tile nosave ${A.selected.has(p.id) ? 'picked' : ''} ${A.selecting ? 'picking' : ''}" data-ph="${i}" style="background-image:url('${url(p.thumb_path)}')" aria-label="Fotoğraf ${i + 1}">
         ${likesOf(p.id).length ? `<span class="tile-like">${svg('heart')}${likesOf(p.id).length}</span>` : ''}</button>`).join('')}</div>`
       : `<div class="card"><div class="empty">${svg('img')}<span>Bu albümde henüz fotoğraf yok.</span></div></div>`}
-    <p class="section-title">Yorumlar</p>
-    <div id="al-comments"></div>`;
+`;
   box.querySelectorAll('[data-ph]').forEach((b) => b.onclick = () => {
     if (!A.selecting) return openViewer(+b.dataset.ph);
     const id = A.photos[+b.dataset.ph].id;
@@ -298,7 +297,6 @@ async function drawAlbum() {
     toast('Konum kaydedildi'); renderAlbum();
   }));
   document.getElementById('al-menu')?.addEventListener('click', albumMenu);
-  inlineComments('album', a.id, document.getElementById('al-comments'));
 }
 const likesOf = (pid) => A.likes.filter((l) => l.photo_id === pid);
 

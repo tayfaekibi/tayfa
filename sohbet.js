@@ -26,7 +26,7 @@ const EMOJIS = ['👍', '😂', '❤️', '😮', '😢', '🎉'];
 export async function loadUnread() {
   if (S.ctx.status !== 'active') return;
   const [last, mine] = await Promise.all([
-    sb.from('messages').select('created_at, sender').eq('group_id', S.ctx.group_id).neq('kind', 'system').order('created_at', { ascending: false }).limit(1),
+    sb.from('messages').select('created_at, sender').eq('group_id', S.ctx.group_id).is('game_id', null).neq('kind', 'system').order('created_at', { ascending: false }).limit(1),
     sb.from('chat_reads').select('last_read_at').eq('group_id', S.ctx.group_id).eq('user_id', me()).maybeSingle(),
   ]);
   const m = last.data?.[0];
@@ -88,7 +88,7 @@ function fitViewport() { window.visualViewport?.addEventListener('resize', onVV)
 
 // ------------------------------------------------------------------ veri
 async function loadMessages() {
-  const { data, error } = await sb.from('messages').select('*').eq('group_id', S.ctx.group_id)
+  const { data, error } = await sb.from('messages').select('*').eq('group_id', S.ctx.group_id).is('game_id', null)
     .order('created_at', { ascending: false }).limit(200);
   if (error) throw error;
   C.list = (data || []).reverse();
@@ -112,6 +112,14 @@ async function decrypt(m) {
   } catch (e) { C.plain.set(m.id, { err: 'bad' }); }
 }
 
+async function devicesFor(userIds) {
+  const { data, error } = await sb.from('devices').select('id, user_id, public_key').in('user_id', userIds);
+  if (error) throw error;
+  const list = data || [];
+  if (!list.some((d) => d.id === dev.id)) list.push({ id: dev.id, user_id: me(), public_key: dev.pub });
+  return list;
+}
+
 async function groupDevices() {
   if (C.devices && Date.now() - C.devicesAt < 60000) return C.devices;
   const ids = activeMembers().map((m) => m.user_id);
@@ -126,6 +134,7 @@ function subscribe() {
   if (C.channel) sb.removeChannel(C.channel);
   C.channel = sb.channel('sohbet-' + S.ctx.group_id, { config: { broadcast: { self: false } } })
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `group_id=eq.${S.ctx.group_id}` }, async ({ new: m }) => {
+      if (m.game_id) { gameChatIncoming(m); return; }
       if (C.list.some((x) => x.id === m.id)) return;
       await decrypt(m);
       C.list.push(m);
@@ -369,7 +378,7 @@ async function sendText() {
 }
 
 // ------------------------------------------------------------------ sesli mesaj
-function bindRecorder(btn, canRecord) {
+function bindRecorder(btn, canRecord, onDone = sendVoice) {
   let rec = null, chunks = [], t0 = 0, timer = null, y0 = 0, cancelled = false, stream = null, pressed = false;
   const bar = () => document.getElementById('rec-bar');
   const stop = (send) => {
@@ -398,7 +407,7 @@ function bindRecorder(btn, canRecord) {
       const type = rec.mimeType || mime || 'audio/mp4';
       rec = null;
       if (cancelled || dur < 700) { if (!cancelled) toast('Kaydetmek için basılı tut'); return; }
-      sendVoice(new Blob(chunks, { type }), Math.min(dur, MAX_VOICE_MS));
+      onDone(new Blob(chunks, { type }), Math.min(dur, MAX_VOICE_MS));
     };
     rec.start(250);
     btn.classList.add('rec');
@@ -439,7 +448,7 @@ const voiceCache = new Map();
 let playing = null;
 function bindVoice(el) {
   const id = el.dataset.voice;
-  const m = C.list.find((x) => x.id === id);
+  const m = C.list.find((x) => x.id === id) || GC.list.find((x) => x.id === id);
   const playBtn = el.querySelector('.voice-play'), speedBtn = el.querySelector('.voice-speed'), bar = el.querySelector('.voice-bar i');
   speedBtn.onclick = (e) => {
     e.stopPropagation();
@@ -475,4 +484,109 @@ function bindVoice(el) {
       playBtn.innerHTML = svg('pause');
     } catch (err) { playBtn.innerHTML = svg('play'); toast(errText(err)); }
   };
+}
+
+
+// ================================================================== oyun içi sohbet (sadece oyuncular görür)
+const GC = { gameId: null, players: [], list: [], seenAt: 0, onChange: null };
+const QUICK = ['Hadi oyna! ⏰', 'Güzel hamle 👏', 'Şansa bak 🎲', 'Olmaz böyle 😅', 'İyi oyundu 🤝'];
+
+export async function gameChatLoad(game, onChange) {
+  GC.gameId = game.id; GC.players = game.players; GC.onChange = onChange; GC.list = [];
+  if (!game.players.includes(me())) return;
+  dev = await E.ensureDevice(me(), rpc);
+  const { data } = await sb.from('messages').select('*').eq('game_id', game.id).order('created_at', { ascending: false }).limit(100);
+  GC.list = (data || []).reverse();
+  await Promise.all(GC.list.map(decrypt));
+  try { GC.seenAt = +(localStorage.getItem('tayfa-oyun-okundu-' + game.id) || 0); } catch (_) { GC.seenAt = 0; }
+}
+
+export function gameChatIncoming(m) {
+  if (m.game_id !== GC.gameId || GC.list.some((x) => x.id === m.id)) return;
+  decrypt(m).then(() => {
+    GC.list.push(m);
+    if (document.getElementById('gc-list')) { drawGC(true); markGCSeen(); }
+    GC.onChange?.();
+  });
+}
+
+const gcText = (m) => { const p = C.plain.get(m.id) || {}; return m.kind === 'voice' ? '🎤 Sesli mesaj' : p.t || '🔒'; };
+export function gameChatSummary() {
+  const last = GC.list[GC.list.length - 1];
+  const unread = GC.list.filter((m) => m.sender !== me() && new Date(m.created_at).getTime() > GC.seenAt).length;
+  return { last: last ? `${last.sender === me() ? 'Sen' : nameOf(last.sender)}: ${gcText(last)}` : '', unread };
+}
+function markGCSeen() {
+  GC.seenAt = Date.now();
+  try { localStorage.setItem('tayfa-oyun-okundu-' + GC.gameId, String(GC.seenAt)); } catch (_) { /* */ }
+  GC.onChange?.();
+}
+
+function drawGC(scroll) {
+  const l = document.getElementById('gc-list'); if (!l) return;
+  l.innerHTML = GC.list.length ? GC.list.map((m) => {
+    const mine = m.sender === me(); const p = C.plain.get(m.id) || {};
+    const body = p.err ? `<span class="locked">${svg('lock')}Bu cihazda açılamıyor</span>`
+      : m.kind === 'voice' ? `<div class="voice" data-voice="${m.id}"><button class="voice-play" aria-label="Oynat">${svg('play')}</button>
+          <div class="voice-bar"><i></i></div><span class="voice-t">${fmtDur(m.duration_ms)}</span><button class="voice-speed" aria-label="Hız">1x</button></div>`
+      : `<div class="msg-text">${linkify(esc(p.t || ''))}</div>`;
+    return `<div class="msg ${mine ? 'mine' : ''}">${mine ? '' : avatar(nameOf(m.sender), m.sender)}
+      <div class="msg-col"><div class="bubble">${body}</div></div></div>`;
+  }).join('') : '<p class="small" style="text-align:center;padding:20px 0">Rakibine bir şey yaz ya da hazır mesajlardan birini gönder.</p>';
+  l.querySelectorAll('[data-voice]').forEach((el) => bindVoice(el));
+  if (scroll) l.scrollTop = l.scrollHeight;
+}
+
+async function postGame({ text, blob, dur }) {
+  const devs = await devicesFor(GC.players);
+  const row = { group_id: S.ctx.group_id, sender: me(), game_id: GC.gameId, mentions: [] };
+  let plain;
+  if (blob) {
+    const s = await E.seal(E.enc({ mime: blob.type, dur }), devs);
+    const audio = await E.encBytes(s.msgKey, new Uint8Array(await blob.arrayBuffer()));
+    const path = `${S.ctx.group_id}/${me()}/${crypto.randomUUID()}.bin`;
+    const up = await sb.storage.from('chat').upload(path, new Blob([audio.data], { type: 'application/octet-stream' }), { contentType: 'application/octet-stream' });
+    if (up.error) throw up.error;
+    Object.assign(row, { kind: 'voice', iv: s.iv, ciphertext: s.ciphertext, epk: s.epk, keys: s.keys, audio_path: path, audio_iv: audio.iv, duration_ms: dur });
+    plain = { mime: blob.type, dur }; voiceCache.set('pending', URL.createObjectURL(blob));
+    C.keys.set('pending', s.msgKey);
+  } else {
+    const s = await E.seal(E.enc({ t: text }), devs);
+    Object.assign(row, { kind: 'text', iv: s.iv, ciphertext: s.ciphertext, epk: s.epk, keys: s.keys });
+    plain = { t: text }; C.keys.set('pending', s.msgKey);
+  }
+  const { data, error } = await sb.from('messages').insert(row).select().single();
+  if (error) throw error;
+  C.plain.set(data.id, plain); C.keys.set(data.id, C.keys.get('pending'));
+  if (blob) voiceCache.set(data.id, voiceCache.get('pending'));
+  if (!GC.list.some((x) => x.id === data.id)) GC.list.push(data);
+  drawGC(true); GC.onChange?.();
+}
+
+export function openGameChat(game) {
+  if (!game.players.includes(me())) return;
+  const opp = game.players.find((u) => u !== me());
+  openSheet(`${sheetHead(`${esc(nameOf(opp))} ile sohbet`)}
+    <span class="e2e-line" style="margin-top:-8px">${svg('lock')}Uçtan uca şifreli · sadece siz ikiniz görürsünüz</span>
+    <div class="gc-list chat-list" id="gc-list"></div>
+    <div class="mention-bar">${QUICK.map((q) => `<button data-q="${esc(q)}">${esc(q)}</button>`).join('')}</div>
+    <div class="composer-row">
+      <label class="hidden" for="gc-in">Mesaj</label>
+      <textarea id="gc-in" rows="1" maxlength="500" placeholder="Mesaj yaz"></textarea>
+      <button class="round-btn" id="gc-btn" aria-label="Sesli mesaj için basılı tut">${svg('mic')}</button>
+    </div>
+    <div class="rec-bar hidden" id="rec-bar"><span class="rec-dot"></span><span id="rec-time">0:00</span><span class="grow small" style="color:var(--sub)">Bırakınca gider · iptal için yukarı kaydır</span></div>`, () => {
+    drawGC(true); markGCSeen();
+    const inp = document.getElementById('gc-in'); const btn = document.getElementById('gc-btn');
+    const setBtn = () => { const has = inp.value.trim().length > 0; btn.innerHTML = svg(has ? 'send' : 'mic'); btn.classList.toggle('send', has); };
+    inp.addEventListener('input', setBtn);
+    const sendT = async (t) => {
+      try { await postGame({ text: t }); } catch (e) { toast('Gönderilemedi: ' + errText(e)); }
+    };
+    btn.addEventListener('click', () => { const t = inp.value.trim(); if (!t) return; inp.value = ''; setBtn(); sendT(t); });
+    document.querySelectorAll('[data-q]').forEach((b) => b.onclick = () => sendT(b.dataset.q));
+    bindRecorder(btn, () => !inp.value.trim(), async (blob, dur) => {
+      try { await postGame({ blob, dur }); } catch (e) { toast('Sesli mesaj gönderilemedi: ' + errText(e)); }
+    });
+  });
 }

@@ -298,3 +298,10 @@ body.kb-open .tabbar { display: none; }
 .known-dot { width: 18px; height: 18px; border-radius: 50%; border: 3px solid #FFF; background: #2B4A66; box-shadow: 0 1px 6px rgba(0,0,0,.35); padding: 0; }
 .card.flash { animation: flash 1.8s ease; }
 @keyframes flash { 0%, 40% { box-shadow: 0 0 0 3px var(--accent); } 100% { box-shadow: 0 0 0 0 transparent; } }
+.gc-bar { width: 100%; display: flex; align-items: center; gap: 10px; background: #FFF; border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; text-align: left; font-size: 14px; }
+.gc-bar svg { width: 20px; height: 20px; color: var(--accent); flex-shrink: 0; }
+.gc-bar .grow { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--sub); }
+.gc-n { background: var(--accent); color: #FFF; font-size: 12px; border-radius: 10px; padding: 2px 8px; }
+.gc-list { max-height: 40vh; min-height: 120px; padding: 4px 0; flex: none; }
+.composer-row textarea { flex: 1; min-width: 0; resize: none; border: 1px solid var(--field); border-radius: 22px; padding: 11px 16px; font-size: 16px; line-height: 1.35; max-height: 120px; background: #FFF; }
+.composer-row textarea:focus { outline: none; border-color: var(--accent); }
