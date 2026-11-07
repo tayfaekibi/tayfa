@@ -1,7 +1,11 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 import { SUPABASE_URL, SUPABASE_KEY, VAPID_PUBLIC_KEY, APP_VERSION } from './config.js';
+import * as Anilar from './anilar.js';
+import * as Sohbet from './sohbet.js';
+import * as Oyunlar from './oyunlar.js';
+import { ensureDevice } from './e2e.js';
 
-const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
+export const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
 });
 
@@ -28,6 +32,22 @@ const ICON = {
   share: '<path d="M12 3v13M7 8l5-5 5 5"/><path d="M5 13v6a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-6"/>',
   cal: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
   x: '<path d="M6 6l12 12M18 6L6 18"/>',
+  lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
+  send: '<path d="M4 12l16-8-6 16-3-7z"/>',
+  play: '<path d="M7 5l12 7-12 7z"/>',
+  pause: '<path d="M8 5v14M16 5v14"/>',
+  img: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 16l5-5 4 4 3-3 6 6"/><circle cx="15.5" cy="8.5" r="1.5"/>',
+  upload: '<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>',
+  heart: '<path d="M12 20s-7-4.5-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.5-7 10-7 10z"/>',
+  comment: '<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/>',
+  map: '<path d="M9 4l-6 2v14l6-2 6 2 6-2V4l-6 2z"/><path d="M9 4v14M15 6v14"/>',
+  grid: '<rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/>',
+  dots: '<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>',
+  reply: '<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 6 6v3"/>',
+  trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+  chev: '<path d="M9 6l6 6-6 6"/>',
+  trophy: '<path d="M8 4h8v5a4 4 0 0 1-8 0z"/><path d="M8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4M12 13v4M8 20h8"/>',
 };
 const svg = (n, extra = '') => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" ${extra}>${ICON[n]}</svg>`;
 
@@ -144,7 +164,7 @@ async function loadData() {
   const since = new Date(Date.now() - 6 * 3600 * 1000).toISOString();
   const [ev, mem] = await Promise.all([
     sb.from('events').select('*').eq('group_id', S.ctx.group_id).gte('starts_at', since).order('starts_at'),
-    sb.from('members').select('user_id, display_name, role, status, created_at').eq('group_id', S.ctx.group_id),
+    sb.from('members').select('user_id, display_name, role, status, created_at, chat_notify').eq('group_id', S.ctx.group_id),
   ]);
   if (ev.error) throw ev.error;
   if (mem.error) throw mem.error;
@@ -156,7 +176,13 @@ async function loadData() {
     if (r.error) throw r.error;
     S.rsvps = r.data || [];
   } else S.rsvps = [];
+  if (ids.length) {
+    const c = await sb.from('comments').select('target_id').eq('target_type', 'event').in('target_id', ids);
+    S.commentCounts = {};
+    for (const r of c.data || []) S.commentCounts[r.target_id] = (S.commentCounts[r.target_id] || 0) + 1;
+  }
   if (isAdmin()) S.invites = (await rpc('list_invites')) || [];
+  Sohbet.loadUnread().catch(() => {});
 }
 const isAdmin = () => S.ctx.role === 'admin' && S.ctx.status === 'active';
 const me = () => S.session?.user?.id;
@@ -183,7 +209,8 @@ async function refreshAll() {
     if (S.ctx.status !== before) subscribeRealtime();
     await loadData();
   } catch (e) { console.warn(e); }
-  render();
+  if (S.ctx.status !== 'active' || S.view === 'admin' || (S.view === 'main' && S.tab === 'home')) render();
+  else if (S.view === 'main') updateTabDots();
 }
 
 // ------------------------------------------------------------------ çizim
@@ -192,7 +219,27 @@ function render() {
   if (!S.ctx.status) return renderNoGroup();
   if (S.ctx.status === 'pending') return renderPending();
   if (S.view === 'admin' && isAdmin()) return renderAdmin();
+  if (S.view === 'album') return Anilar.renderAlbum();
+  if (S.view === 'game') return Oyunlar.renderGame();
   renderMain();
+}
+
+// Bildirim bağlantıları ve adres çubuğu: #yonetim, #anilar, #album/<id>, #sohbet, #oyun/<id>
+export function route(hash) {
+  if (!S.session || S.ctx.status !== 'active') return;
+  const [k, id] = String(hash || '').replace(/^#/, '').split('/');
+  if (k === 'yonetim' && isAdmin()) { S.view = 'admin'; }
+  else if (k === 'album' && id) { S.view = 'album'; S.albumId = id; }
+  else if (k === 'oyun' && id) { S.view = 'game'; S.gameId = id; }
+  else if (k === 'sohbet') { S.view = 'main'; S.tab = 'chat'; }
+  else if (k === 'anilar') { S.view = 'main'; S.tab = 'memory'; }
+  else return;
+  render();
+}
+export function goMain(tab) {
+  S.view = 'main'; if (tab) S.tab = tab;
+  if (location.hash) history.replaceState(null, '', location.pathname);
+  render();
 }
 
 // ---- giriş / kayıt
@@ -321,16 +368,29 @@ function renderPending() {
 function renderMain() {
   const tabs = [['home', 'Ana sayfa', 'home'], ['memory', 'Anılar', 'memory'], ['chat', 'Sohbet', 'chat'], ['game', 'Oyunlar', 'game']];
   let body = '';
+  if (S.tab !== 'chat') Sohbet.unmount();
   if (S.tab === 'home') body = homeView();
-  else body = soonView(S.tab);
+  else if (S.tab === 'memory') body = Anilar.tabView();
+  else if (S.tab === 'chat') body = Sohbet.tabView();
+  else body = Oyunlar.tabView();
   $app.innerHTML = `<div class="screen">
-    <main class="content">${body}</main>
+    <main class="content ${S.tab === 'chat' ? 'chat-content' : ''}">${body}</main>
     ${S.tab === 'home' ? `<button class="fab" id="fab">${svg('plus')}${isAdmin() ? 'Plan aç' : 'Plan öner'}</button>` : ''}
-    <nav class="tabbar" aria-label="Ana menü">${tabs.map(([k, l, i]) => `<button class="tab ${S.tab === k ? 'on' : ''}" data-tab="${k}">${svg(i)}<span>${l}</span></button>`).join('')}</nav>
+    <nav class="tabbar" aria-label="Ana menü">${tabs.map(([k, l, i]) => `<button class="tab ${S.tab === k ? 'on' : ''}" data-tab="${k}">${svg(i)}<span>${l}</span><i class="tab-dot hidden" data-dot="${k}"></i></button>`).join('')}</nav>
   </div>`;
   $app.querySelectorAll('[data-tab]').forEach((b) => b.onclick = () => { S.tab = b.dataset.tab; renderMain(); window.scrollTo(0, 0); });
   document.getElementById('fab')?.addEventListener('click', showEventSheet);
   bindHome();
+  if (S.tab === 'memory') Anilar.mount();
+  else if (S.tab === 'chat') Sohbet.mount();
+  else if (S.tab === 'game') Oyunlar.mount();
+  updateTabDots();
+}
+export function updateTabDots() {
+  const d = $app.querySelector('[data-dot="chat"]');
+  if (d) d.classList.toggle('hidden', !(S.unreadChat && S.tab !== 'chat'));
+  const g = $app.querySelector('[data-dot="game"]');
+  if (g) g.classList.toggle('hidden', !(S.myTurnGames > 0 && S.tab !== 'game'));
 }
 
 function header(title, subtitle) {
@@ -404,7 +464,10 @@ function eventCard(e) {
       <button class="btn ${mine === 'yes' ? 'ok-on' : mine ? '' : 'primary'}" data-rsvp="${e.id}" data-a="yes">${mine === 'yes' ? '✓ Geliyorum' : 'Geliyorum'}</button>
       <button class="btn ${mine === 'no' ? 'no-on' : ''}" data-rsvp="${e.id}" data-a="no">Gelemem</button>
     </div>
-    ${isAdmin() ? `<button class="btn small danger" data-del="${e.id}" style="align-self:flex-start">Planı sil</button>` : ''}
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <button class="btn small" data-com="${e.id}">${svg('comment')}Yorumlar${S.commentCounts?.[e.id] ? ' · ' + S.commentCounts[e.id] : ''}</button>
+      ${isAdmin() ? `<button class="btn small danger" data-del="${e.id}">Planı sil</button>` : ''}
+    </div>
   </section>`;
 }
 const svgInline = (n) => `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px" aria-hidden="true">${ICON[n]}</svg>`;
@@ -429,6 +492,10 @@ function bindHome() {
     catch (e) { toast(errText(e)); }
   });
   $app.querySelectorAll('[data-who]').forEach((b) => b.onclick = () => showWhoSheet(b.dataset.who));
+  $app.querySelectorAll('[data-com]').forEach((b) => b.onclick = () => {
+    const e = S.events.find((x) => x.id === b.dataset.com);
+    Anilar.showComments('event', b.dataset.com, e?.title || 'Plan', async () => { await loadData(); if (S.view === 'main' && S.tab === 'home') render(); });
+  });
 }
 
 function soonView(tab) {
@@ -583,7 +650,19 @@ function showNotifySheet() {
   openSheet(`${sheetHead('Bildirimler')}<p class="sub" style="line-height:1.5">${text}</p>
     ${st === 'default' ? `<button class="btn primary block" id="n-on">${svg('bell')}Bildirimleri aç</button>` : ''}
     ${st === 'needs-install' ? `<button class="btn primary block" id="n-inst">Nasıl eklenir?</button>` : ''}
-    ${st === 'granted' ? `<button class="btn block" id="n-test">Bu cihazı yeniden kaydet</button>` : ''}`, () => {
+    ${st === 'granted' ? `<button class="btn block" id="n-test">Bu cihazı yeniden kaydet</button>` : ''}
+    <p class="section-title">Sohbet bildirimleri</p>
+    <div class="seg3">${[['all', 'Tümü'], ['mentions', 'Bahsedilince'], ['off', 'Kapalı']].map(([k, l]) =>
+      `<button data-cn="${k}" class="${(S.members.find((m) => m.user_id === me())?.chat_notify || 'all') === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+    <p class="small">Planlar, onaylar ve oyun sırası bildirimleri bu ayardan etkilenmez.</p>`, () => {
+    document.querySelectorAll('[data-cn]').forEach((b) => b.onclick = async () => {
+      try {
+        await rpc('set_chat_notify', { p_mode: b.dataset.cn });
+        const m = S.members.find((x) => x.user_id === me()); if (m) m.chat_notify = b.dataset.cn;
+        document.querySelectorAll('[data-cn]').forEach((x) => x.classList.toggle('on', x === b));
+        toast('Kaydedildi');
+      } catch (e) { toast(errText(e)); }
+    });
     document.getElementById('n-on')?.addEventListener('click', async () => { await enablePush(); closeSheet(); render(); });
     document.getElementById('n-inst')?.addEventListener('click', showInstallSheet);
     document.getElementById('n-test')?.addEventListener('click', async () => { await enablePush(); closeSheet(); });
@@ -637,10 +716,14 @@ async function onSession(session) {
     await loadContext();
     await loadData();
     subscribeRealtime();
-    if (location.hash === '#yonetim' && isAdmin()) S.view = 'admin';
     enablePush({ silent: true }); // izin önceden verildiyse aboneliği tazele
+    if (S.ctx.status === 'active') {
+      ensureDevice(me(), rpc).catch((e) => console.warn('cihaz anahtarı', e)); // şifreli sohbet için
+      Oyunlar.loadMyTurns().then(updateTabDots).catch(() => {});
+    }
   } catch (e) { toast(errText(e)); }
   render();
+  if (location.hash) route(location.hash);
 }
 
 let lastUid;
@@ -652,12 +735,17 @@ sb.auth.onAuthStateChange((event, session) => {
 });
 
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.session) refreshAll(); });
-window.addEventListener('hashchange', () => {
-  if (location.hash === '#yonetim' && isAdmin()) { S.view = 'admin'; render(); }
-});
+window.addEventListener('hashchange', () => route(location.hash));
 navigator.serviceWorker?.addEventListener('message', (e) => {
-  if (e.data?.type === 'open' && e.data.url?.includes('#yonetim') && isAdmin()) { S.view = 'admin'; render(); }
-  else if (S.session) refreshAll();
+  if (e.data?.type === 'open' && e.data.url) {
+    try { route(new URL(e.data.url).hash); } catch (_) { /* */ }
+  }
+  if (S.session) refreshAll();
 });
+
+export {
+  S, esc, svg, ICON, avatar, toast, errText, rpc, fmt, openSheet, closeSheet, sheetHead, field, val,
+  isAdmin, me, nameOf, activeMembers, render, header, bindHeader, svgInline, copyText, loadData,
+};
 
 registerSW();

@@ -14,3 +14,9 @@ Arkadaş grubu uygulaması: planlar, anılar, sohbet ve oyunlar. Telefonun ana e
 - Plan önerme, yönetici onayı, katılım (geliyorum / gelemem)
 - Yönetim ekranı: davet, üye ve plan onayları, üye çıkarma
 - Bildirimler; onay bekleyen plan için 5 dakika sonra tek hatırlatma
+
+## Sürüm 2.0.0
+- Anılar: harita (OpenFreeMap), albümler, yönetici fotoğraf yükler (küçültülür, cihaz bilgisi temizlenir), indirilemeyen görüntüleyici, beğeni ve yorum
+- Sohbet: uçtan uca şifreli grup sohbeti, sesli mesaj, yanıt, tepki, @bahsetme, görüldü, 30 gün sonra silinme
+- Tavla: sunucuda zar ve kural kontrolü, sıra bildirimi, aylık tablo
+- Plan yorumları; veritabanı güncellemeleri GitHub Actions ile otomatik
