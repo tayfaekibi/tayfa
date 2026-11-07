@@ -234,6 +234,7 @@ export function route(hash) {
   else if (k === 'sohbet') { S.view = 'main'; S.tab = 'chat'; }
   else if (k === 'anilar') { S.view = 'main'; S.tab = 'memory'; }
   else return;
+  closeSheet();
   render();
 }
 export function goMain(tab) {

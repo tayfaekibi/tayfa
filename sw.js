@@ -1,5 +1,5 @@
 // Tayfa servis çalışanı: çevrimdışı kabuk + bildirimler
-const CACHE = 'tayfa-v2.0.1';
+const CACHE = 'tayfa-v2.1.0';
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'config.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'aydinlatma.html',
   'anilar.js', 'sohbet.js', 'oyunlar.js', 'e2e.js', 'supabase/functions/_shared/tavla.js'];
@@ -21,7 +21,7 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== self.location.origin) return;
   e.respondWith(
-    fetch(e.request)
+    fetch(e.request, { cache: 'no-cache' }) // her açılışta sunucuya "değişti mi?" diye sor
       .then((res) => {
         if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(e.request, copy)); }
         return res;

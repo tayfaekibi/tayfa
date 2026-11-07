@@ -4,11 +4,34 @@ import {
   isAdmin, me, nameOf, render, header, bindHeader, goMain,
 } from './app.js';
 
-const MAP_STYLE = 'https://tiles.openfreemap.org/styles/positron';
+const ROAD_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
+const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services/';
+const SAT_STYLE = {
+  version: 8,
+  sources: {
+    sat: { type: 'raster', tileSize: 256, maxzoom: 19, tiles: [ESRI + 'World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+      attribution: 'Uydu: Esri, Maxar, Earthstar Geographics ve GIS kullanıcı topluluğu' },
+    roads: { type: 'raster', tileSize: 256, maxzoom: 19, tiles: [ESRI + 'Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}'] },
+    places: { type: 'raster', tileSize: 256, maxzoom: 19, tiles: [ESRI + 'Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}'] },
+  },
+  layers: [{ id: 'sat', type: 'raster', source: 'sat' }, { id: 'roads', type: 'raster', source: 'roads' }, { id: 'places', type: 'raster', source: 'places' }],
+};
+function mapKind() { try { return localStorage.getItem('tayfa-harita') === 'uydu' ? 'uydu' : 'yol'; } catch (_) { return 'yol'; } }
+function setMapKind(k) { try { localStorage.setItem('tayfa-harita', k); } catch (_) { /* */ } }
+const styleFor = (k) => (k === 'uydu' ? SAT_STYLE : ROAD_STYLE);
+function addKindToggle(wrap, m) {
+  const b = document.createElement('button');
+  b.className = 'map-kind';
+  const label = () => { b.innerHTML = mapKind() === 'uydu' ? '🗺️ Yol' : '🛰️ Uydu'; };
+  label();
+  b.onclick = (e) => { e.stopPropagation(); const k = mapKind() === 'uydu' ? 'yol' : 'uydu'; setMapKind(k); m.setStyle(styleFor(k)); label(); };
+  wrap.appendChild(b);
+}
 const MAPLIBRE = 'https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl';
 const TR_CENTER = [35.2, 39.0];
 
-const A = { albums: [], mode: 'map', photos: [], likes: [], loadedFor: null };
+const A = { albums: [], mode: 'map', photos: [], likes: [], loose: [], selecting: false, selected: new Set() };
+const isLoose = (a) => !!a?.is_loose;
 let map = null;
 
 // ------------------------------------------------------------------ imzalı (süreli) bağlantılar
@@ -50,23 +73,25 @@ export function tabView() {
 export async function mount() {
   bindHeader();
   document.querySelectorAll('[data-am]').forEach((b) => b.onclick = () => { A.mode = b.dataset.am; render(); });
-  document.getElementById('al-new')?.addEventListener('click', () => showAlbumForm());
+  document.getElementById('al-new')?.addEventListener('click', uploadChooser);
   try { await loadAlbums(); } catch (e) { toast(errText(e)); }
   const sub = document.getElementById('al-sub');
   if (!sub) return;
   const total = A.albums.reduce((n, a) => n + a.photo_count, 0);
-  sub.textContent = A.albums.length ? `${total} fotoğraf · ${A.albums.length} albüm` : 'Henüz anı yok';
+  const named = A.albums.filter((a) => !isLoose(a)).length;
+  sub.textContent = total || named ? `${total} fotoğraf · ${named} albüm` : 'Henüz anı yok';
   if (A.mode === 'map') await drawMap(); else await drawList();
 }
 
 async function drawList() {
   const box = document.getElementById('al-body');
-  if (!A.albums.length) { box.innerHTML = emptyState(); bindEmpty(); return; }
-  const url = await signed(A.albums.map((a) => a.cover_thumb));
-  box.innerHTML = `<div class="album-grid">${A.albums.map((a) => `
+  const list = A.albums.filter((a) => !isLoose(a) || a.photo_count > 0).sort((x, y) => isLoose(y) - isLoose(x));
+  if (!list.length) { box.innerHTML = emptyState(); bindEmpty(); return; }
+  const url = await signed(list.map((a) => a.cover_thumb));
+  box.innerHTML = `<div class="album-grid">${list.map((a) => `
     <button class="album-card" data-album="${a.id}">
       <div class="album-cover nosave" style="${a.cover_thumb ? `background-image:url('${url(a.cover_thumb)}')` : ''}">${a.cover_thumb ? '' : svg('img')}</div>
-      <div class="album-meta"><b>${esc(a.title)}</b><span>${esc(dateTr(a.taken_on))} · ${a.photo_count} fotoğraf</span></div>
+      <div class="album-meta"><b>${esc(a.title)}</b><span>${isLoose(a) ? 'Albümsüz' : esc(dateTr(a.taken_on))} · ${a.photo_count} fotoğraf</span></div>
     </button>`).join('')}</div>`;
   box.querySelectorAll('[data-album]').forEach((b) => b.onclick = () => openAlbum(b.dataset.album));
 }
@@ -99,12 +124,32 @@ async function drawMap() {
   try { ml = await loadMapLibre(); } catch (e) { box.innerHTML = `<div class="card"><p class="sub">${esc(e.message)}. İnternet bağlantını kontrol et.</p></div>`; return; }
   if (!document.getElementById('map')) return;
   if (map) { try { map.remove(); } catch (_) { /* */ } }
-  map = new ml.Map({ container: 'map', style: MAP_STYLE, center: TR_CENTER, zoom: 4.6, attributionControl: { compact: true } });
+  map = new ml.Map({ container: 'map', style: styleFor(mapKind()), center: TR_CENTER, zoom: 4.6, attributionControl: { compact: true } });
+  addKindToggle(box.querySelector('.map-wrap'), map);
   map.touchPitch?.disable?.(); map.dragRotate.disable(); map.touchZoomRotate.disableRotation();
   map.on('load', () => map.resize());
   setTimeout(() => map && map.resize(), 300);
-  const pts = A.albums.filter((a) => a.lat != null && a.lng != null);
-  const url = await signed(pts.map((a) => a.cover_thumb));
+  const pts = A.albums.filter((a) => !isLoose(a) && a.lat != null && a.lng != null);
+  const la = A.albums.find(isLoose);
+  A.loose = [];
+  if (la?.photo_count) {
+    const r = await sb.from('photos').select('*').eq('album_id', la.id).not('lat', 'is', null).order('taken_at', { ascending: true, nullsFirst: false });
+    A.loose = r.data || [];
+  }
+  const url = await signed(pts.map((a) => a.cover_thumb).concat(A.loose.map((p) => p.thumb_path)));
+  A.loose.forEach((ph, idx) => {
+    const el = document.createElement('button');
+    el.className = 'map-pin single';
+    el.setAttribute('aria-label', 'Fotoğraf');
+    el.innerHTML = `<span class="map-pin-img nosave" style="background-image:url('${url(ph.thumb_path)}')"></span>`;
+    el.onclick = async (ev) => {
+      ev.stopPropagation();
+      A.photos = A.loose; A.album = la;
+      const l = await sb.from('photo_likes').select('*').in('photo_id', A.loose.map((p) => p.id)); A.likes = l.data || [];
+      openViewer(idx, () => {});
+    };
+    new ml.Marker({ element: el, anchor: 'bottom' }).setLngLat([ph.lng, ph.lat]).addTo(map);
+  });
   for (const a of pts) {
     const el = document.createElement('button');
     el.className = 'map-pin';
@@ -113,15 +158,16 @@ async function drawMap() {
     el.onclick = (ev) => { ev.stopPropagation(); showMapCard(a, url); map.easeTo({ center: [a.lng, a.lat], duration: 400 }); };
     new ml.Marker({ element: el, anchor: 'bottom' }).setLngLat([a.lng, a.lat]).addTo(map);
   }
-  if (pts.length === 1) map.jumpTo({ center: [pts[0].lng, pts[0].lat], zoom: 10 });
-  else if (pts.length > 1) {
+  const all = pts.map((a) => [a.lng, a.lat]).concat(A.loose.map((p) => [p.lng, p.lat]));
+  if (all.length === 1) map.jumpTo({ center: all[0], zoom: 10 });
+  else if (all.length > 1) {
     const b = new ml.LngLatBounds();
-    pts.forEach((a) => b.extend([a.lng, a.lat]));
+    all.forEach((c) => b.extend(c));
     map.fitBounds(b, { padding: 60, maxZoom: 11, duration: 0 });
   }
-  const noLoc = A.albums.length - pts.length;
+  const noLoc = A.albums.filter((a) => !isLoose(a) && a.lat == null).length;
   const card = document.getElementById('map-card');
-  if (!A.albums.length) card.innerHTML = emptyState();
+  if (!A.albums.some((a) => a.photo_count > 0 || !isLoose(a))) card.innerHTML = emptyState();
   else if (noLoc) card.innerHTML = `<p class="small" style="text-align:center">${noLoc} albümün konumu yok; "Albümler" sekmesinden görebilirsin.</p>`;
   map.on('click', () => { if (A.albums.length) card.innerHTML = ''; });
 }
@@ -155,7 +201,7 @@ export async function renderAlbum() {
     ]);
     if (al.error) throw al.error;
     if (!al.data) { document.getElementById('album-body').innerHTML = '<p class="sub">Albüm bulunamadı ya da silinmiş.</p>'; return; }
-    A.album = al.data; A.photos = ph.data || [];
+    A.album = al.data; A.photos = ph.data || []; A.selecting = false; A.selected = new Set();
     const ids = A.photos.map((p) => p.id);
     A.likes = [];
     if (ids.length) { const l = await sb.from('photo_likes').select('*').in('photo_id', ids); A.likes = l.data || []; }
@@ -171,19 +217,29 @@ async function drawAlbum() {
   box.innerHTML = `
     <header style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
       <div><h1 style="font-size:26px">${esc(a.title)}</h1>
-      <p class="sub" style="margin-top:2px">${esc(dateTr(a.taken_on))}${a.place ? ' · ' + esc(a.place) : ''} · ${A.photos.length} fotoğraf</p></div>
-      ${isAdmin() ? `<button class="icon-btn" id="al-menu" aria-label="Albüm seçenekleri">${svg('dots')}</button>` : ''}
+      <p class="sub" style="margin-top:2px">${isLoose(a) ? 'Albüme konmamış fotoğraflar' : esc(dateTr(a.taken_on)) + (a.place ? ' · ' + esc(a.place) : '')} · ${A.photos.length} fotoğraf</p></div>
+      ${isAdmin() && !isLoose(a) ? `<button class="icon-btn" id="al-menu" aria-label="Albüm seçenekleri">${svg('dots')}</button>` : ''}
     </header>
-    ${isAdmin() ? `<button class="btn primary block" id="al-add">${svg('upload')}Fotoğraf ekle</button>` : ''}
-    ${a.lat == null && isAdmin() ? `<button class="banner" id="al-loc"><span class="pip"></span><span class="grow">Albümün konumu yok, haritada görünmüyor</span><span>Konum seç</span></button>` : ''}
+    ${isAdmin() ? (A.selecting
+      ? `<div class="row2"><button class="btn primary" id="al-move" ${A.selected.size ? '' : 'disabled'}>Albüme taşı (${A.selected.size})</button><button class="btn" id="al-selx">Vazgeç</button></div>`
+      : `<div class="row2"><button class="btn primary" id="al-add">${svg('upload')}Fotoğraf ekle</button>${A.photos.length ? `<button class="btn" id="al-sel">Seç ve taşı</button>` : '<span></span>'}</div>`) : ''}
+    ${a.lat == null && isAdmin() && !isLoose(a) ? `<button class="banner" id="al-loc"><span class="pip"></span><span class="grow">Albümün konumu yok, haritada görünmüyor</span><span>Konum seç</span></button>` : ''}
     ${A.photos.length ? `<div class="photo-grid">${A.photos.map((p, i) => `
-      <button class="photo-tile nosave" data-ph="${i}" style="background-image:url('${url(p.thumb_path)}')" aria-label="Fotoğraf ${i + 1}">
+      <button class="photo-tile nosave ${A.selected.has(p.id) ? 'picked' : ''} ${A.selecting ? 'picking' : ''}" data-ph="${i}" style="background-image:url('${url(p.thumb_path)}')" aria-label="Fotoğraf ${i + 1}">
         ${likesOf(p.id).length ? `<span class="tile-like">${svg('heart')}${likesOf(p.id).length}</span>` : ''}</button>`).join('')}</div>`
       : `<div class="card"><div class="empty">${svg('img')}<span>Bu albümde henüz fotoğraf yok.</span></div></div>`}
     <p class="section-title">Yorumlar</p>
     <div id="al-comments"></div>`;
-  box.querySelectorAll('[data-ph]').forEach((b) => b.onclick = () => openViewer(+b.dataset.ph));
+  box.querySelectorAll('[data-ph]').forEach((b) => b.onclick = () => {
+    if (!A.selecting) return openViewer(+b.dataset.ph);
+    const id = A.photos[+b.dataset.ph].id;
+    if (A.selected.has(id)) A.selected.delete(id); else A.selected.add(id);
+    drawAlbum();
+  });
   document.getElementById('al-add')?.addEventListener('click', () => pickAndUpload(a));
+  document.getElementById('al-sel')?.addEventListener('click', () => { A.selecting = true; A.selected = new Set(); drawAlbum(); });
+  document.getElementById('al-selx')?.addEventListener('click', () => { A.selecting = false; A.selected = new Set(); drawAlbum(); });
+  document.getElementById('al-move')?.addEventListener('click', () => moveSheet([...A.selected], () => { A.selecting = false; renderAlbum(); }));
   document.getElementById('al-loc')?.addEventListener('click', () => pickLocation(a, async (ll) => {
     await rpc('update_album', { p_album: a.id, p_title: a.title, p_place: a.place || '', p_lat: ll.lat, p_lng: ll.lng, p_taken_on: a.taken_on });
     toast('Konum kaydedildi'); renderAlbum();
@@ -216,7 +272,7 @@ function albumMenu() {
 }
 
 // ------------------------------------------------------------------ fotoğraf görüntüleyici (indirme yok)
-function openViewer(start) {
+function openViewer(start, onClose) {
   let i = start;
   const root = document.getElementById('sheet-root');
   const draw = async () => {
@@ -227,13 +283,15 @@ function openViewer(start) {
     root.innerHTML = `<div class="viewer" id="viewer">
       <div class="viewer-top"><button class="icon-btn dark" id="v-close" aria-label="Kapat">${svg('x')}</button>
         <span>${i + 1} / ${A.photos.length}</span>
-        ${isAdmin() ? `<button class="icon-btn dark" id="v-del" aria-label="Fotoğrafı sil">${svg('trash')}</button>` : '<span style="width:44px"></span>'}</div>
+        ${isAdmin() ? `<button class="icon-btn dark" id="v-more" aria-label="Fotoğraf seçenekleri">${svg('dots')}</button>` : '<span style="width:44px"></span>'}</div>
       <div class="viewer-stage" id="v-stage"><div class="viewer-img nosave" style="background-image:url('${url(p.path)}')"></div><div class="viewer-shield"></div></div>
       <div class="viewer-bottom">
         <button class="like-btn ${liked ? 'on' : ''}" id="v-like">${svg('heart')}<span>${n || ''}</span></button>
         <span class="small" style="color:#CFC6BF">${p.taken_at ? esc(fmt.short(new Date(p.taken_at))) : ''}</span>
       </div></div>`;
-    document.getElementById('v-close').onclick = () => { root.innerHTML = ''; drawAlbum(); };
+    const close = () => { root.innerHTML = ''; if (onClose) onClose(); else drawAlbum(); };
+    document.getElementById('v-close').onclick = close;
+    document.getElementById('v-more')?.addEventListener('click', () => photoMenu(p, close, () => draw()));
     document.getElementById('v-like').onclick = async () => {
       try {
         const on = await rpc('toggle_like', { p_photo: p.id });
@@ -242,16 +300,11 @@ function openViewer(start) {
         draw();
       } catch (e) { toast(errText(e)); }
     };
-    document.getElementById('v-del')?.addEventListener('click', async () => {
-      if (!confirm('Bu fotoğraf herkes için silinecek. Emin misin?')) return;
-      try {
-        const paths = await rpc('delete_photo', { p_photo: p.id });
-        if (paths?.length) await sb.storage.from('photos').remove(paths);
-        A.photos.splice(i, 1);
-        if (!A.photos.length) { root.innerHTML = ''; return renderAlbum(); }
-        i = Math.min(i, A.photos.length - 1); draw();
-      } catch (e) { toast(errText(e)); }
-    });
+    A._removeCurrent = () => {
+      A.photos.splice(i, 1);
+      if (!A.photos.length) { close(); return; }
+      i = Math.min(i, A.photos.length - 1); draw();
+    };
     const stage = document.getElementById('v-stage');
     let x0 = null;
     stage.addEventListener('touchstart', (e) => { x0 = e.touches[0].clientX; }, { passive: true });
@@ -268,6 +321,58 @@ function openViewer(start) {
     });
   };
   draw();
+}
+
+// Görüntüleyicideki "…" menüsü (yönetici): albüme taşı, konum ver, sil
+function photoMenu(p, closeViewer, redraw) {
+  const root = document.getElementById('sheet-root');
+  const box = document.createElement('div');
+  box.className = 'sheet-backdrop'; box.style.zIndex = 70;
+  box.innerHTML = `<div class="sheet"><div class="grab"></div>${sheetHead('Fotoğraf')}
+    <button class="btn block" id="pm-move">Albüme taşı</button>
+    <button class="btn block" id="pm-loc">${svg('map')}${p.lat != null ? 'Konumu değiştir' : 'Konum ver'}</button>
+    <button class="btn block danger" id="pm-del">${svg('trash')}Fotoğrafı sil</button></div>`;
+  root.appendChild(box);
+  const shut = () => box.remove();
+  box.addEventListener('click', (e) => { if (e.target === box) shut(); });
+  box.querySelector('[data-close]').onclick = shut;
+  box.querySelector('#pm-move').onclick = () => { shut(); closeViewer(); moveSheet([p.id], () => (S.view === 'album' ? renderAlbum() : render())); };
+  box.querySelector('#pm-loc').onclick = () => { shut(); closeViewer(); pickLocation(p, async (ll) => {
+    await rpc('set_photo_location', { p_photo: p.id, p_lat: ll.lat, p_lng: ll.lng });
+    toast('Konum kaydedildi');
+  }); };
+  box.querySelector('#pm-del').onclick = async () => {
+    if (!confirm('Bu fotoğraf herkes için silinecek. Emin misin?')) return;
+    shut();
+    try {
+      const paths = await rpc('delete_photo', { p_photo: p.id });
+      if (paths?.length) await sb.storage.from('photos').remove(paths);
+      A._removeCurrent?.();
+      toast('Fotoğraf silindi');
+    } catch (e) { toast(errText(e)); }
+  };
+}
+
+// Seçilen fotoğrafları bir albüme taşı (ya da yeni albüm aç)
+async function moveSheet(ids, done) {
+  if (!ids.length) return;
+  try { await loadAlbums(); } catch (_) { /* */ }
+  const targets = A.albums.filter((a) => !isLoose(a) && a.id !== A.album?.id);
+  openSheet(`${sheetHead(`${ids.length} fotoğrafı taşı`)}
+    <button class="btn primary block" id="mv-new">${svg('plus')}Yeni albüm oluştur</button>
+    ${targets.length ? '<p class="section-title">Mevcut albümler</p>' + targets.map((a) => `
+      <button class="game-row" data-mv="${a.id}"><div class="grow"><div class="name">${esc(a.title)}</div><div class="small">${esc(dateTr(a.taken_on))} · ${a.photo_count} fotoğraf</div></div>${svg('chev')}</button>`).join('') : ''}`, () => {
+    const go = async (aid) => {
+      try { const n = await rpc('move_photos', { p_photos: ids, p_album: aid }); closeSheet(); toast(`${n} fotoğraf taşındı`); done?.(); }
+      catch (e) { toast(errText(e)); }
+    };
+    document.querySelectorAll('[data-mv]').forEach((b) => b.onclick = () => go(b.dataset.mv));
+    document.getElementById('mv-new').onclick = () => {
+      const t = prompt('Yeni albümün adı:');
+      if (!t || !t.trim()) return;
+      rpc('create_album', { p_title: t.trim(), p_place: '', p_lat: null, p_lng: null, p_taken_on: null }).then(go).catch((e) => toast(errText(e)));
+    };
+  });
 }
 
 // ------------------------------------------------------------------ yorumlar (albüm ve planlar)
@@ -323,6 +428,21 @@ export function showComments(type, id, title, onChange) {
   });
 }
 
+function uploadChooser() {
+  openSheet(`${sheetHead('Fotoğraf yükle')}
+    <button class="choice" id="up-quick"><b>${svg('img')}Hızlı yükle</b><span>Albüm sormadan yükle. Her fotoğraf çekildiği yerde haritada görünür; sonra istediğin albüme taşıyabilirsin.</span></button>
+    <button class="choice" id="up-album"><b>${svg('grid')}Yeni albüm</b><span>Bir gezi ya da buluşma için albüm aç, fotoğrafları içine yükle.</span></button>`, () => {
+    document.getElementById('up-quick').onclick = async () => {
+      closeSheet();
+      try {
+        const id = await rpc('loose_album');
+        pickAndUpload({ id, title: 'Tek fotoğraflar', is_loose: true, lat: null });
+      } catch (e) { toast(errText(e)); }
+    };
+    document.getElementById('up-album').onclick = () => { closeSheet(); showAlbumForm(); };
+  });
+}
+
 // ------------------------------------------------------------------ albüm oluştur / düzenle (yönetici)
 function showAlbumForm(edit) {
   const today = new Date().toISOString().slice(0, 10);
@@ -364,7 +484,7 @@ function pickAndUpload(album) {
 }
 
 async function uploadFiles(album, files) {
-  let done = 0, ok = 0, gotLoc = album.lat != null;
+  let done = 0, ok = 0, gotLoc = album.lat != null, missingLoc = 0;
   openSheet(`${sheetHead('Yükleniyor')}<p class="sub" id="up-txt">0 / ${files.length}</p>
     <div class="progress"><i id="up-bar" style="width:0%"></i></div>
     <p class="small">Fotoğraflar telefonunda küçültülüyor ve içlerindeki cihaz bilgisi temizleniyor. Bu ekranı kapatma.</p>`);
@@ -383,7 +503,7 @@ async function uploadFiles(album, files) {
       if (r.error) throw r.error;
       await rpc('add_photo', { p_album: album.id, p_path: p1, p_thumb: p2, p_w: big.w, p_h: big.h,
         p_lat: meta.lat ?? null, p_lng: meta.lng ?? null, p_taken_at: meta.date ?? null });
-      if (meta.lat != null) gotLoc = true;
+      if (meta.lat != null) gotLoc = true; else missingLoc++;
       ok++;
     } catch (e) { console.warn(e); toast('Bir fotoğraf yüklenemedi: ' + errText(e)); }
     done++;
@@ -393,6 +513,11 @@ async function uploadFiles(album, files) {
   try { await rpc('finish_album_upload', { p_album: album.id, p_added: ok }); } catch (_) { /* */ }
   closeSheet();
   toast(`${ok} fotoğraf yüklendi${ok ? ', gruba haber verildi' : ''}`);
+  if (isLoose(album)) {
+    if (ok && missingLoc) setTimeout(() => toast(`${missingLoc} fotoğrafta konum yoktu; "Tek fotoğraflar" albümünden konum verebilirsin`, 5000), 2700);
+    if (S.view === 'album') await renderAlbum(); else render();
+    return;
+  }
   await renderAlbum();
   if (ok && !gotLoc) {
     toast('Fotoğraflarda konum bilgisi yoktu, haritadan seçebilirsin', 4000);
@@ -463,12 +588,14 @@ function parseTiff(v, t) {
 
 // ------------------------------------------------------------------ haritadan konum seç
 async function pickLocation(album, onPick) {
+  // album: konumu seçilecek albüm ya da fotoğraf (lat/lng alanları olan herhangi bir kayıt)
   openSheet(`${sheetHead('Konum seç')}<p class="sub">Haritada albümün yerine dokun.</p>
     <div class="map-wrap" style="height:52vh"><div id="pick-map" class="map"></div></div>
     <button class="btn primary block" id="pick-ok" disabled>Bu konumu kullan</button>`, async () => {
     let ml; try { ml = await loadMapLibre(); } catch (e) { toast(errText(e)); return; }
     const center = album.lat != null ? [album.lng, album.lat] : TR_CENTER;
-    const m = new ml.Map({ container: 'pick-map', style: MAP_STYLE, center, zoom: album.lat != null ? 10 : 4.6, attributionControl: { compact: true } });
+    const m = new ml.Map({ container: 'pick-map', style: styleFor(mapKind()), center, zoom: album.lat != null ? 10 : 4.6, attributionControl: { compact: true } });
+    addKindToggle(document.getElementById('pick-map').parentElement, m);
     m.dragRotate.disable(); m.touchZoomRotate.disableRotation();
     m.on('load', () => m.resize()); setTimeout(() => m.resize(), 300);
     let mk = null, ll = null;

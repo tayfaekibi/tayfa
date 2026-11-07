@@ -197,7 +197,7 @@ function systemCard(m) {
         : `<button class="btn small primary" data-sys-rsvp="${p.event_id}">Geliyorum</button>`}</div></div>`;
   }
   if (p.type === 'album') {
-    return `<div class="sys-card"><div class="sys-row">${svg('img')}<span style="flex:1"><b>${esc(p.title)}</b> albümüne ${p.count} fotoğraf eklendi</span>
+    return `<div class="sys-card"><div class="sys-row">${svg('img')}<span style="flex:1">${p.loose ? `${p.count} yeni fotoğraf eklendi` : `<b>${esc(p.title)}</b> albümüne ${p.count} fotoğraf eklendi`}</span>
       <button class="btn small" data-sys-album="${p.album_id}">Gör</button></div></div>`;
   }
   if (p.type === 'game') {
