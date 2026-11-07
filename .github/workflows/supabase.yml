@@ -30,9 +30,37 @@ jobs:
       - name: Gizli anahtarı Supabase'e kaydet
         if: steps.chk.outputs.ok == 'true' && env.VAPID_PRIVATE_KEY != ''
         run: supabase secrets set VAPID_PRIVATE_KEY="$VAPID_PRIVATE_KEY" --project-ref "$PROJECT_REF" --yes
-      - name: Bildirim fonksiyonunu yükle
+      - name: Veritabanı güncellemelerini uygula
         if: steps.chk.outputs.ok == 'true'
-        run: supabase functions deploy push --project-ref "$PROJECT_REF" --no-verify-jwt --yes
+        run: |
+          set -euo pipefail
+          q() {  # $1: SQL dosyası → sonucu yazdırır, hata olursa durur
+            jq -Rs '{query: .}' "$1" > /tmp/body.json
+            code=$(curl -sS -o /tmp/out.json -w '%{http_code}' -X POST \
+              "https://api.supabase.com/v1/projects/$PROJECT_REF/database/query" \
+              -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "Content-Type: application/json" \
+              --data-binary @/tmp/body.json)
+            if [ "$code" -ge 300 ]; then echo "Hata ($code):"; cat /tmp/out.json; exit 1; fi
+          }
+          printf '%s' "create table if not exists public.tayfa_migrations (name text primary key, applied_at timestamptz not null default now());
+          alter table public.tayfa_migrations enable row level security;
+          select coalesce(json_agg(name), '[]'::json) as names from public.tayfa_migrations;" > /tmp/init.sql
+          q /tmp/init.sql
+          applied=$(jq -c '.[0].names // []' /tmp/out.json)
+          echo "Uygulanmış: $applied"
+          for f in $(ls supabase/migrations/*.sql 2>/dev/null | sort); do
+            name=$(basename "$f")
+            if echo "$applied" | jq -e --arg n "$name" 'index($n) != null' > /dev/null; then
+              echo "Atlandı: $name"; continue
+            fi
+            echo "Uygulanıyor: $name"
+            { cat "$f"; printf "\n;insert into public.tayfa_migrations (name) values ('%s') on conflict do nothing;\n" "$name"; } > /tmp/m.sql
+            q /tmp/m.sql
+            echo "Tamam: $name"
+          done
+      - name: Sunucu fonksiyonlarını yükle
+        if: steps.chk.outputs.ok == 'true'
+        run: supabase functions deploy push tavla --project-ref "$PROJECT_REF" --no-verify-jwt --yes
       - name: Fonksiyonu dene
         if: steps.chk.outputs.ok == 'true'
         run: |

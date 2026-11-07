@@ -3,4 +3,7 @@ project_id = "tayfa"
 [functions.push]
 verify_jwt = false
 
+[functions.tavla]
+verify_jwt = false
+
 # Bildirim fonksiyonu GitHub Actions ile yüklenir.
