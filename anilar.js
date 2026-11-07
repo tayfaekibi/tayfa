@@ -587,10 +587,38 @@ function parseTiff(v, t) {
 }
 
 // ------------------------------------------------------------------ haritadan konum seç
+// Daha önce kullanılmış yerler: konumu olan albümler + tek fotoğrafların konumları (yakın olanlar birleştirilir)
+async function knownPlaces() {
+  const places = [];
+  const near = (a, b) => Math.abs(a.lat - b.lat) < 0.002 && Math.abs(a.lng - b.lng) < 0.002; // ~200 m
+  try {
+    const { data: al } = await sb.from('albums').select('id, title, place, lat, lng, photo_count, is_loose')
+      .eq('group_id', S.ctx.group_id).not('lat', 'is', null);
+    for (const a of al || []) {
+      if (a.is_loose) continue;
+      places.push({ name: a.title, sub: a.place || `${a.photo_count} fotoğraf`, lat: a.lat, lng: a.lng });
+    }
+    const { data: lq } = await sb.from('albums').select('id').eq('group_id', S.ctx.group_id).eq('is_loose', true).limit(1);
+    const la = lq?.[0];
+    if (la) {
+      const { data: ph } = await sb.from('photos').select('lat, lng').eq('album_id', la.id).not('lat', 'is', null);
+      for (const p of ph || []) {
+        const hit = places.find((x) => near(x, p));
+        if (hit) { if (hit.loose) hit.count++; continue; }
+        places.push({ name: 'Fotoğraf konumu', lat: p.lat, lng: p.lng, loose: true, count: 1 });
+      }
+    }
+  } catch (e) { console.warn(e); }
+  places.forEach((x) => { if (x.loose) x.sub = `${x.count} tek fotoğraf`; });
+  return places;
+}
+
 async function pickLocation(album, onPick) {
   // album: konumu seçilecek albüm ya da fotoğraf (lat/lng alanları olan herhangi bir kayıt)
-  openSheet(`${sheetHead('Konum seç')}<p class="sub">Haritada albümün yerine dokun.</p>
-    <div class="map-wrap" style="height:52vh"><div id="pick-map" class="map"></div></div>
+  openSheet(`${sheetHead('Konum seç')}
+    <div id="pick-known"></div>
+    <p class="sub" id="pick-hint">Haritada yerine dokun ya da daha önce kullanılan bir yeri seç.</p>
+    <div class="map-wrap" style="height:46vh"><div id="pick-map" class="map"></div></div>
     <button class="btn primary block" id="pick-ok" disabled>Bu konumu kullan</button>`, async () => {
     let ml; try { ml = await loadMapLibre(); } catch (e) { toast(errText(e)); return; }
     const center = album.lat != null ? [album.lng, album.lat] : TR_CENTER;
@@ -599,11 +627,41 @@ async function pickLocation(album, onPick) {
     m.dragRotate.disable(); m.touchZoomRotate.disableRotation();
     m.on('load', () => m.resize()); setTimeout(() => m.resize(), 300);
     let mk = null, ll = null;
-    m.on('click', (e) => {
-      ll = e.lngLat;
+    const choose = (lngLat, label, fly) => {
+      ll = { lng: lngLat.lng, lat: lngLat.lat };
       if (!mk) mk = new ml.Marker({ color: '#B8431D' }).setLngLat(ll).addTo(m); else mk.setLngLat(ll);
       document.getElementById('pick-ok').disabled = false;
+      const h = document.getElementById('pick-hint');
+      if (h) h.textContent = label ? `Seçilen yer: ${label}` : 'Haritada seçtiğin nokta kullanılacak.';
+      if (fly) m.flyTo({ center: [ll.lng, ll.lat], zoom: Math.max(m.getZoom(), 13), duration: 600 });
+    };
+    m.on('click', (e) => {
+      choose(e.lngLat, null, false);
+      document.querySelectorAll('[data-kp]').forEach((x) => x.classList.remove('on'));
     });
+
+    // Kayıtlı yerler: üstte liste + haritada küçük noktalar
+    const places = await knownPlaces();
+    const box = document.getElementById('pick-known');
+    if (box && places.length) {
+      box.innerHTML = `<p class="section-title" style="margin:0 0 6px">Daha önce kullanılan yerler</p>
+        <div class="known-row">${places.map((x, i) => `<button class="known" data-kp="${i}"><b>${esc(x.name)}</b><span>${esc(x.sub)}</span></button>`).join('')}</div>`;
+      box.querySelectorAll('[data-kp]').forEach((b) => b.onclick = () => {
+        const x = places[+b.dataset.kp];
+        box.querySelectorAll('[data-kp]').forEach((y) => y.classList.toggle('on', y === b));
+        choose({ lng: x.lng, lat: x.lat }, x.name, true);
+      });
+      for (const [i, x] of places.entries()) {
+        const el = document.createElement('button');
+        el.className = 'known-dot'; el.setAttribute('aria-label', x.name);
+        el.onclick = (ev) => { ev.stopPropagation(); box.querySelector(`[data-kp="${i}"]`)?.click(); };
+        new ml.Marker({ element: el }).setLngLat([x.lng, x.lat]).addTo(m);
+      }
+      if (album.lat == null && places.length) {
+        const b = new ml.LngLatBounds(); places.forEach((x) => b.extend([x.lng, x.lat]));
+        m.fitBounds(b, { padding: 50, maxZoom: 11, duration: 0 });
+      }
+    }
     document.getElementById('pick-ok').onclick = async () => {
       if (!ll) return;
       try { await onPick({ lat: Math.round(ll.lat * 1e6) / 1e6, lng: Math.round(ll.lng * 1e6) / 1e6 }); closeSheet(); }
