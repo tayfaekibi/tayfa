@@ -1,0 +1,4 @@
+project_id = "tayfa"
+
+[functions.push]
+verify_jwt = false
