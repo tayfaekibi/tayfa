@@ -16,7 +16,7 @@ const SAT_STYLE = {
   },
   layers: [{ id: 'sat', type: 'raster', source: 'sat' }, { id: 'roads', type: 'raster', source: 'roads' }, { id: 'places', type: 'raster', source: 'places' }],
 };
-function mapKind() { try { return localStorage.getItem('tayfa-harita') === 'uydu' ? 'uydu' : 'yol'; } catch (_) { return 'yol'; } }
+function mapKind() { try { return localStorage.getItem('tayfa-harita') === 'yol' ? 'yol' : 'uydu'; } catch (_) { return 'uydu'; } } // varsayılan: uydu
 function setMapKind(k) { try { localStorage.setItem('tayfa-harita', k); } catch (_) { /* */ } }
 const styleFor = (k) => (k === 'uydu' ? SAT_STYLE : ROAD_STYLE);
 function addKindToggle(wrap, m) {
