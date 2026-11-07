@@ -1,4 +1,4 @@
-import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+import { createClient } from './vendor/supabase.js';
 import { SUPABASE_URL, SUPABASE_KEY, VAPID_PUBLIC_KEY, APP_VERSION } from './config.js';
 import * as Anilar from './anilar.js';
 import * as Sohbet from './sohbet.js';
@@ -112,6 +112,47 @@ async function registerSW() {
   if (!('serviceWorker' in navigator)) return;
   try { swReg = await navigator.serviceWorker.register('sw.js'); } catch (e) { console.warn(e); }
 }
+
+// Yeni sürüm gelince uygulamayı yenile (yazı yazılırken ya da oyun oynanırken değil, uygun anda)
+let hadController = !!navigator.serviceWorker?.controller;
+let pendingReload = false;
+const safeToReload = () => {
+  const a = document.activeElement;
+  const typing = a && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT') && a.value;
+  return !typing && !document.getElementById('sb') && S.view !== 'game';
+};
+navigator.serviceWorker?.addEventListener('controllerchange', () => {
+  if (!hadController) { hadController = true; return; }
+  if (safeToReload()) location.reload(); else pendingReload = true;
+});
+
+// Bildirime dokununca gidilecek yer (servis çalışanı kaydeder)
+async function checkPendingRoute() {
+  try {
+    const c = await caches.open('tayfa-yonlendirme');
+    const r = await c.match('pending');
+    if (!r) return;
+    const target = await r.text();
+    await c.delete('pending');
+    route(new URL(target).hash);
+  } catch (_) { /* */ }
+}
+
+// Hızlı açılış: son görülen veriyi telefonda sakla, açılışta önce onu göster
+const snapKey = () => 'tayfa-snap-' + me();
+function saveSnapshot() {
+  try {
+    localStorage.setItem(snapKey(), JSON.stringify({ ctx: S.ctx, members: S.members, events: S.events, rsvps: S.rsvps, commentCounts: S.commentCounts || {} }));
+  } catch (_) { /* */ }
+}
+function loadSnapshot() {
+  try {
+    const o = JSON.parse(localStorage.getItem(snapKey()) || 'null');
+    if (!o || o.ctx?.status !== 'active') return false;
+    Object.assign(S, { ctx: o.ctx, members: o.members || [], events: o.events || [], rsvps: o.rsvps || [], commentCounts: o.commentCounts || {} });
+    return true;
+  } catch (_) { return false; }
+}
 const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 function pushState() {
   if (!pushSupported()) return isIOS && !isStandalone ? 'needs-install' : 'unsupported';
@@ -182,6 +223,7 @@ async function loadData() {
     for (const r of c.data || []) S.commentCounts[r.target_id] = (S.commentCounts[r.target_id] || 0) + 1;
   }
   if (isAdmin()) S.invites = (await rpc('list_invites')) || [];
+  saveSnapshot();
   Sohbet.loadUnread().catch(() => {});
 }
 const isAdmin = () => S.ctx.role === 'admin' && S.ctx.status === 'active';
@@ -233,6 +275,19 @@ export function route(hash) {
   else if (k === 'oyun' && id) { S.view = 'game'; S.gameId = id; }
   else if (k === 'sohbet') { S.view = 'main'; S.tab = 'chat'; }
   else if (k === 'anilar') { S.view = 'main'; S.tab = 'memory'; }
+  else if (k === 'plan' && id) {
+    const e = S.events.find((x) => x.id === id);
+    if (e && e.status === 'pending' && isAdmin()) { S.view = 'admin'; }
+    else {
+      S.view = 'main'; S.tab = 'home';
+      closeSheet(); render();
+      setTimeout(() => {
+        const el = document.getElementById('ev-' + id);
+        if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1800); }
+      }, 60);
+      return;
+    }
+  }
   else return;
   closeSheet();
   render();
@@ -454,7 +509,7 @@ function eventCard(e) {
   if (yes.length) parts.push(`${yes.length} kişi geliyor`);
   if (no.length) parts.push(`${no.length} gelemiyor`);
   if (waiting) parts.push(`${waiting} cevap bekleniyor`);
-  return `<section class="card">
+  return `<section class="card" id="ev-${e.id}">
     <div class="ev-head">${dateBox(e)}<div style="flex:1;min-width:0"><h2>${esc(e.title)}</h2>
       <div class="ev-meta"><span>${svgInline('clock')}${esc(fmt.time(d))}</span>${e.place ? `<span>${svgInline('pin')}${esc(e.place)}</span>` : ''}</div></div></div>
     ${e.note ? `<p class="ev-note">${esc(e.note)}</p>` : ''}
@@ -713,6 +768,8 @@ async function onSession(session) {
     try { S.setupNeeded = await rpc('setup_needed'); } catch (_) { S.setupNeeded = false; }
     return render();
   }
+  const fast = loadSnapshot();
+  if (fast) { render(); if (location.hash) route(location.hash); }
   try {
     await loadContext();
     await loadData();
@@ -721,10 +778,13 @@ async function onSession(session) {
     if (S.ctx.status === 'active') {
       ensureDevice(me(), rpc).catch((e) => console.warn('cihaz anahtarı', e)); // şifreli sohbet için
       Oyunlar.loadMyTurns().then(updateTabDots).catch(() => {});
+      Anilar.warmUp();
     }
-  } catch (e) { toast(errText(e)); }
-  render();
-  if (location.hash) route(location.hash);
+  } catch (e) { if (!fast) toast(errText(e)); }
+  if (!fast || S.view === 'main' && S.tab === 'home' || S.ctx.status !== 'active') render();
+  else updateTabDots();
+  if (location.hash && !fast) route(location.hash);
+  checkPendingRoute();
 }
 
 let lastUid;
@@ -735,10 +795,16 @@ sb.auth.onAuthStateChange((event, session) => {
   setTimeout(() => onSession(session)); // supabase kilidinin dışında çalıştır
 });
 
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.session) refreshAll(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  if (pendingReload && safeToReload()) { location.reload(); return; }
+  swReg?.update?.().catch(() => {});
+  if (S.session) { checkPendingRoute(); refreshAll(); }
+});
 window.addEventListener('hashchange', () => route(location.hash));
 navigator.serviceWorker?.addEventListener('message', (e) => {
   if (e.data?.type === 'open' && e.data.url) {
+    caches.open('tayfa-yonlendirme').then((c) => c.delete('pending')).catch(() => {});
     try { route(new URL(e.data.url).hash); } catch (_) { /* */ }
   }
   if (S.session) refreshAll();

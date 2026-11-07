@@ -1,33 +1,81 @@
-// Tayfa servis çalışanı: çevrimdışı kabuk + bildirimler
-const CACHE = 'tayfa-v2.2.0';
-const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'config.js', 'manifest.webmanifest',
+// Tayfa servis çalışanı
+// - Uygulama dosyaları telefona kaydedilir ve oradan anında açılır (hızlı açılış).
+// - Yeni sürüm yayınlanınca bu dosyadaki CACHE adı değişir; telefon yeni dosyaları arka planda indirir
+//   ve uygulama kendini yeniler.
+// - Fotoğraflar da telefonda saklanır, ikinci açılışta internetten tekrar indirilmez.
+// - Bildirime dokununca ilgili ekran açılır.
+const CACHE = 'tayfa-v2.3.0';
+const PHOTO_CACHE = 'tayfa-foto-v1';
+const ROUTE_CACHE = 'tayfa-yonlendirme';
+const MAX_PHOTOS = 600;
+const SHELL = [
+  './', 'index.html', 'style.css', 'app.js', 'config.js', 'manifest.webmanifest',
+  'anilar.js', 'sohbet.js', 'oyunlar.js', 'e2e.js', 'supabase/functions/_shared/tavla.js',
+  'vendor/supabase.js', 'vendor/maplibre-gl.js', 'vendor/maplibre-gl.css',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'aydinlatma.html',
-  'anilar.js', 'sohbet.js', 'oyunlar.js', 'e2e.js', 'supabase/functions/_shared/tavla.js'];
+];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  e.waitUntil((async () => {
+    const c = await caches.open(CACHE);
+    // HTTP önbelleğini atla, en yeni dosyaları al
+    await c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' })));
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener('activate', (e) => {
-  e.waitUntil(
-    caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
-      .then(() => self.clients.claim()),
-  );
+  e.waitUntil((async () => {
+    const keep = new Set([CACHE, PHOTO_CACHE, ROUTE_CACHE]);
+    for (const k of await caches.keys()) if (!keep.has(k)) await caches.delete(k);
+    await self.clients.claim();
+  })());
 });
 
-// Kendi dosyalarımız: önce ağdan (güncel sürüm gelsin), ağ yoksa önbellekten.
+// Fotoğraf bağlantılarındaki geçici anahtarı at: aynı fotoğraf her zaman aynı kayıtla eşleşsin
+function photoKey(url) {
+  return url.origin + url.pathname;
+}
+async function trimPhotos() {
+  const c = await caches.open(PHOTO_CACHE);
+  const keys = await c.keys();
+  for (let i = 0; i < keys.length - MAX_PHOTOS; i++) await c.delete(keys[i]);
+}
+
 self.addEventListener('fetch', (e) => {
+  if (e.request.method !== 'GET') return;
   const url = new URL(e.request.url);
-  if (e.request.method !== 'GET' || url.origin !== self.location.origin) return;
-  e.respondWith(
-    fetch(e.request, { cache: 'no-cache' }) // her açılışta sunucuya "değişti mi?" diye sor
-      .then((res) => {
-        if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(e.request, copy)); }
-        return res;
-      })
-      .catch(() => caches.match(e.request).then((r) => r || caches.match('index.html'))),
-  );
+
+  // Supabase'teki fotoğraflar (imzalı bağlantılar)
+  if (url.hostname.endsWith('.supabase.co') && url.pathname.includes('/storage/v1/object/sign/photos/')) {
+    e.respondWith((async () => {
+      const c = await caches.open(PHOTO_CACHE);
+      const key = photoKey(url);
+      const hit = await c.match(key);
+      if (hit) return hit;
+      const res = await fetch(url.href, { mode: 'cors', credentials: 'omit' });
+      if (res.ok) { c.put(key, res.clone()).then(trimPhotos); }
+      return res;
+    })());
+    return;
+  }
+
+  if (url.origin !== self.location.origin) return;
+
+  // Uygulama dosyaları: önce telefondaki kopya
+  e.respondWith((async () => {
+    const c = await caches.open(CACHE);
+    const req = e.request.mode === 'navigate' ? 'index.html' : e.request;
+    const hit = await c.match(req, { ignoreSearch: true });
+    if (hit) return hit;
+    try {
+      const res = await fetch(e.request);
+      if (res.ok && url.pathname.startsWith(new URL(self.registration.scope).pathname)) c.put(e.request, res.clone());
+      return res;
+    } catch (err) {
+      return (await c.match('index.html')) || Response.error();
+    }
+  })());
 });
 
 self.addEventListener('push', (e) => {
@@ -49,13 +97,15 @@ self.addEventListener('notificationclick', (e) => {
   e.notification.close();
   const target = new URL(e.notification.data?.url || './', self.registration.scope).href;
   e.waitUntil((async () => {
+    // Uygulama uykudaysa mesaj kaybolabilir; gidilecek yeri ayrıca kaydet, uygulama açılınca okusun
+    const rc = await caches.open(ROUTE_CACHE);
+    await rc.put('pending', new Response(target));
     const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    for (const c of all) {
-      if (c.url.startsWith(self.registration.scope)) {
-        await c.focus();
-        c.postMessage({ type: 'open', url: target });
-        return;
-      }
+    const client = all.find((c) => c.url.startsWith(self.registration.scope));
+    if (client) {
+      try { await client.focus(); } catch (_) { /* */ }
+      client.postMessage({ type: 'open', url: target });
+      return;
     }
     await self.clients.openWindow(target);
   })());

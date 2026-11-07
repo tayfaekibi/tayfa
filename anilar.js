@@ -27,7 +27,7 @@ function addKindToggle(wrap, m) {
   b.onclick = (e) => { e.stopPropagation(); const k = mapKind() === 'uydu' ? 'yol' : 'uydu'; setMapKind(k); m.setStyle(styleFor(k)); label(); };
   wrap.appendChild(b);
 }
-const MAPLIBRE = 'https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl';
+const MAPLIBRE = 'vendor/maplibre-gl';
 const TR_CENTER = [35.2, 39.0];
 
 const A = { albums: [], mode: 'map', photos: [], likes: [], loose: [], selecting: false, selected: new Set() };
@@ -35,17 +35,36 @@ const isLoose = (a) => !!a?.is_loose;
 let map = null;
 
 // ------------------------------------------------------------------ imzalı (süreli) bağlantılar
-const urlCache = new Map();
+// Bağlantılar 24 saat geçerli ve telefonda saklanır: aynı fotoğraf için tekrar sunucuya sorulmaz
+const URL_KEY = 'tayfa-foto-url';
+const URL_TTL = 24 * 3600;
+const urlCache = (() => {
+  try { return new Map(Object.entries(JSON.parse(localStorage.getItem(URL_KEY) || '{}'))); } catch (_) { return new Map(); }
+})();
+function saveUrls() {
+  try {
+    const now = Date.now();
+    for (const [k, v] of urlCache) if (!(v.exp > now)) urlCache.delete(k);
+    localStorage.setItem(URL_KEY, JSON.stringify(Object.fromEntries(urlCache)));
+  } catch (_) { /* */ }
+}
 async function signed(paths) {
   const now = Date.now();
-  const need = [...new Set(paths.filter((p) => p && !(urlCache.get(p)?.exp > now + 60000)))];
+  const need = [...new Set(paths.filter((p) => p && !(urlCache.get(p)?.exp > now + 600000)))];
   for (let i = 0; i < need.length; i += 100) {
     const chunk = need.slice(i, i + 100);
-    const { data, error } = await sb.storage.from('photos').createSignedUrls(chunk, 3600);
+    const { data, error } = await sb.storage.from('photos').createSignedUrls(chunk, URL_TTL);
     if (error) throw error;
-    for (const r of data || []) if (r.signedUrl) urlCache.set(r.path, { url: r.signedUrl, exp: now + 3600 * 1000 });
+    for (const r of data || []) if (r.signedUrl) urlCache.set(r.path, { url: r.signedUrl, exp: now + URL_TTL * 1000 });
   }
+  if (need.length) saveUrls();
   return (p) => urlCache.get(p)?.url || '';
+}
+// Haritayı önceden yükle (Anılar'a girmeden, boşta)
+export function warmUp() {
+  if (window.maplibregl) return;
+  const go = () => loadMapLibre().catch(() => {});
+  (window.requestIdleCallback || ((f) => setTimeout(f, 2500)))(go);
 }
 
 async function loadAlbums() {
@@ -137,25 +156,20 @@ async function drawMap() {
     A.loose = r.data || [];
   }
   const url = await signed(pts.map((a) => a.cover_thumb).concat(A.loose.map((p) => p.thumb_path)));
-  A.loose.forEach((ph, idx) => {
+  for (const g of groupNearby(A.loose)) {
     const el = document.createElement('button');
     el.className = 'map-pin single';
-    el.setAttribute('aria-label', 'Fotoğraf');
-    el.innerHTML = `<span class="map-pin-img nosave" style="background-image:url('${url(ph.thumb_path)}')"></span>`;
-    el.onclick = async (ev) => {
-      ev.stopPropagation();
-      A.photos = A.loose; A.album = la;
-      const l = await sb.from('photo_likes').select('*').in('photo_id', A.loose.map((p) => p.id)); A.likes = l.data || [];
-      openViewer(idx, () => {});
-    };
-    new ml.Marker({ element: el, anchor: 'bottom' }).setLngLat([ph.lng, ph.lat]).addTo(map);
-  });
+    el.setAttribute('aria-label', `${g.photos.length} fotoğraf`);
+    el.innerHTML = `<span class="map-pin-img nosave" style="background-image:url('${url(g.photos[0].thumb_path)}')"></span>${g.photos.length > 1 ? `<span class="map-pin-n">${g.photos.length}</span>` : ''}`;
+    el.onclick = (ev) => { ev.stopPropagation(); map.easeTo({ center: [g.lng, g.lat], duration: 400 }); placeSheet({ loose: la, photos: g.photos }); };
+    new ml.Marker({ element: el, anchor: 'bottom' }).setLngLat([g.lng, g.lat]).addTo(map);
+  }
   for (const a of pts) {
     const el = document.createElement('button');
     el.className = 'map-pin';
     el.setAttribute('aria-label', a.title);
     el.innerHTML = `<span class="map-pin-img nosave" style="${a.cover_thumb ? `background-image:url('${url(a.cover_thumb)}')` : ''}"></span><span class="map-pin-n">${a.photo_count}</span>`;
-    el.onclick = (ev) => { ev.stopPropagation(); showMapCard(a, url); map.easeTo({ center: [a.lng, a.lat], duration: 400 }); };
+    el.onclick = (ev) => { ev.stopPropagation(); map.easeTo({ center: [a.lng, a.lat], duration: 400 }); placeSheet({ album: a }); };
     new ml.Marker({ element: el, anchor: 'bottom' }).setLngLat([a.lng, a.lat]).addTo(map);
   }
   const all = pts.map((a) => [a.lng, a.lat]).concat(A.loose.map((p) => [p.lng, p.lat]));
@@ -170,6 +184,45 @@ async function drawMap() {
   if (!A.albums.some((a) => a.photo_count > 0 || !isLoose(a))) card.innerHTML = emptyState();
   else if (noLoc) card.innerHTML = `<p class="small" style="text-align:center">${noLoc} albümün konumu yok; "Albümler" sekmesinden görebilirsin.</p>`;
   map.on('click', () => { if (A.albums.length) card.innerHTML = ''; });
+}
+
+// ~200 m içindeki fotoğrafları tek iğnede topla
+function groupNearby(list) {
+  const groups = [];
+  for (const p of list) {
+    const g = groups.find((x) => Math.abs(x.lat - p.lat) < 0.002 && Math.abs(x.lng - p.lng) < 0.002);
+    if (g) g.photos.push(p); else groups.push({ lat: p.lat, lng: p.lng, photos: [p] });
+  }
+  return groups;
+}
+
+// Haritada bir yere dokununca: o yerdeki fotoğraflar küçük küçük açılır, istenen seçilir
+async function placeSheet(place) {
+  let photos = place.photos;
+  const title = place.album ? place.album.title : (photos.length > 1 ? `${photos.length} fotoğraf` : 'Fotoğraf');
+  const sub = place.album ? `${dateTr(place.album.taken_on)} · ${place.album.photo_count} fotoğraf` : 'Bu konumdaki tek fotoğraflar';
+  openSheet(`${sheetHead(esc(title))}<p class="sub">${esc(sub)}</p><div id="ps-grid"><p class="small">Yükleniyor…</p></div>
+    ${place.album ? `<button class="btn block" id="ps-open">${svg('grid')}Albümü aç · yorumlar</button>` : ''}`, async () => {
+    document.getElementById('ps-open')?.addEventListener('click', () => { closeSheet(); openAlbum(place.album.id); });
+    try {
+      if (!photos) {
+        const r = await sb.from('photos').select('*').eq('album_id', place.album.id).order('taken_at', { ascending: true, nullsFirst: false }).order('created_at');
+        photos = r.data || []; place.photos = photos;
+      }
+      const url = await signed(photos.map((p) => p.thumb_path));
+      const grid = document.getElementById('ps-grid'); if (!grid) return;
+      grid.innerHTML = photos.length ? `<div class="photo-grid">${photos.map((p, i) => `<button class="photo-tile nosave" data-pi="${i}" style="background-image:url('${url(p.thumb_path)}')" aria-label="Fotoğraf ${i + 1}"></button>`).join('')}</div>`
+        : '<p class="small">Bu albümde henüz fotoğraf yok.</p>';
+      grid.querySelectorAll('[data-pi]').forEach((b) => b.onclick = async () => {
+        A.photos = photos; A.album = place.album || place.loose;
+        const l = await sb.from('photo_likes').select('*').in('photo_id', photos.map((p) => p.id)); A.likes = l.data || [];
+        closeSheet();
+        openViewer(+b.dataset.pi, () => placeSheet(place));
+      });
+      // büyük hallerini arka planda hazırla: dokununca hemen açılsın
+      signed(photos.slice(0, 12).map((p) => p.path)).catch(() => {});
+    } catch (e) { toast(errText(e)); }
+  });
 }
 
 function showMapCard(a, url) {
@@ -277,7 +330,9 @@ function openViewer(start, onClose) {
   const root = document.getElementById('sheet-root');
   const draw = async () => {
     const p = A.photos[i];
-    const url = await signed([p.path]);
+    const near = [i - 1, i + 1].filter((k) => k >= 0 && k < A.photos.length).map((k) => A.photos[k].path);
+    const url = await signed([p.path, ...near]);
+    near.forEach((k) => { const im = new Image(); im.src = url(k); }); // yandakileri önceden indir
     const liked = likesOf(p.id).some((l) => l.user_id === me());
     const n = likesOf(p.id).length;
     root.innerHTML = `<div class="viewer" id="viewer">

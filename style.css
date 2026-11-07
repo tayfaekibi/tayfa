@@ -296,3 +296,5 @@ body.kb-open .tabbar { display: none; }
 .known span { font-size: 12px; color: var(--sub); }
 .known.on { border-color: var(--accent); background: var(--accent-soft); }
 .known-dot { width: 18px; height: 18px; border-radius: 50%; border: 3px solid #FFF; background: #2B4A66; box-shadow: 0 1px 6px rgba(0,0,0,.35); padding: 0; }
+.card.flash { animation: flash 1.8s ease; }
+@keyframes flash { 0%, 40% { box-shadow: 0 0 0 3px var(--accent); } 100% { box-shadow: 0 0 0 0 transparent; } }
