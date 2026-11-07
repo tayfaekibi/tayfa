@@ -101,6 +101,7 @@ export async function renderGame() {
     <div id="g-body"><p class="sub">Masa hazırlanıyor…</p></div></main></div>`;
   document.getElementById('g-back').onclick = () => { closeGame(); goMain('game'); };
   document.getElementById('g-menu').onclick = gameMenu;
+  startPresence(S.gameId);
   await reloadGame();
   if (G.game) Sohbet.gameChatLoad(G.game, () => drawChatBar()).then(drawChatBar).catch((e) => console.warn(e));
   if (G.channel) sb.removeChannel(G.channel);
@@ -113,7 +114,28 @@ export async function renderGame() {
       drawGame();
     }).subscribe();
 }
-function closeGame() { if (G.channel) { sb.removeChannel(G.channel); G.channel = null; } }
+function closeGame() {
+  if (G.channel) { sb.removeChannel(G.channel); G.channel = null; }
+  stopPresence();
+}
+
+// Oyun ekranı açıkken sunucuya "buradayım" de: bu oyunla ilgili bildirim gelmesin
+let presT = null;
+function startPresence(id) {
+  stopPresence(true);
+  const beat = () => { if (document.visibilityState === 'visible' && S.view === 'game' && S.gameId === id) rpc('set_presence', { p_game: id }).catch(() => {}); };
+  beat();
+  presT = setInterval(() => { if (S.view !== 'game' || S.gameId !== id) return stopPresence(); beat(); }, 20000);
+}
+function stopPresence(silent) {
+  if (presT) { clearInterval(presT); presT = null; }
+  if (!silent) rpc('set_presence', { p_game: null }).catch(() => {});
+}
+document.addEventListener('visibilitychange', () => {
+  if (S.view !== 'game') return;
+  if (document.visibilityState === 'visible') startPresence(S.gameId);
+  else stopPresence();
+});
 
 async function reloadGame() {
   const { data, error } = await sb.from('games').select('*').eq('id', S.gameId).maybeSingle();

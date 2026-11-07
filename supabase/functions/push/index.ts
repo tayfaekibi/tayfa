@@ -63,12 +63,20 @@ Deno.serve(async (req) => {
       .in("user_id", userIds);
     if (subErr) return json({ hata: subErr.message }, 500);
 
+    // Oyun ekranı açık olan kişiye o oyunla ilgili bildirim gönderme (son 45 sn içinde ekrandaysa)
+    const since = new Date(Date.now() - 45 * 1000).toISOString();
+    const { data: pres } = await db.from("presence").select("user_id, game_id").gt("seen_at", since).in("user_id", userIds);
+    const viewing = new Map((pres ?? []).filter((r) => r.game_id).map((r) => [r.user_id, r.game_id]));
+    const gameOf = (tag: string | null) => tag?.match(/^(?:tavla|oyun-sohbet)-(.+)$/)?.[1] ?? null;
+
     let sent = 0;
     const gone: string[] = [];
     const jobs: Promise<void>[] = [];
     for (const item of items) {
       for (const sub of subs ?? []) {
         if (!(item.user_ids as string[]).includes(sub.user_id)) continue;
+        const g = gameOf(item.tag);
+        if (g && viewing.get(sub.user_id) === g) continue;
         const payload = JSON.stringify({
           title: item.title,
           body: item.body,
