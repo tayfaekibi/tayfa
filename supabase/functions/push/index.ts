@@ -77,6 +77,8 @@ Deno.serve(async (req) => {
         if (!(item.user_ids as string[]).includes(sub.user_id)) continue;
         const g = gameOf(item.tag);
         if (g && viewing.get(sub.user_id) === g) continue;
+        // Oyun oynarken genel sohbet bildirimi gelmez (uygulamada sayı olarak görünür); @bahis ve yanıtlar gelir
+        if (item.tag?.startsWith("sohbet-") && viewing.has(sub.user_id)) continue;
         const payload = JSON.stringify({
           title: item.title,
           body: item.body,

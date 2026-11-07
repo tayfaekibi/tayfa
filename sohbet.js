@@ -25,19 +25,20 @@ const EMOJIS = ['👍', '😂', '❤️', '😮', '😢', '🎉'];
 // ------------------------------------------------------------------ okunmamış nokta
 export async function loadUnread() {
   if (S.ctx.status !== 'active') return;
-  const [last, mine] = await Promise.all([
-    sb.from('messages').select('created_at, sender').eq('group_id', S.ctx.group_id).is('game_id', null).neq('kind', 'system').order('created_at', { ascending: false }).limit(1),
-    sb.from('chat_reads').select('last_read_at').eq('group_id', S.ctx.group_id).eq('user_id', me()).maybeSingle(),
-  ]);
-  const m = last.data?.[0];
-  S.unreadChat = !!(m && m.sender !== me() && (!mine.data || new Date(m.created_at) > new Date(mine.data.last_read_at)));
+  const mine = await sb.from('chat_reads').select('last_read_at').eq('group_id', S.ctx.group_id).eq('user_id', me()).maybeSingle();
+  const since = mine.data?.last_read_at || new Date(Date.now() - 30 * 864e5).toISOString();
+  const { count } = await sb.from('messages').select('id', { count: 'exact', head: true })
+    .eq('group_id', S.ctx.group_id).is('game_id', null).neq('kind', 'system').neq('sender', me()).gt('created_at', since);
+  S.unreadCount = count || 0;
+  S.unreadChat = S.unreadCount > 0;
   updateTabDots();
 }
 
 // ------------------------------------------------------------------ ekran
 export function tabView() {
   return `<div class="chat-wrap">
-    <div class="chat-head">${header('Sohbet', `<span class="e2e-line">${svg('lock')}Uçtan uca şifreli · 30 gün saklanır</span>`)}</div>
+    <div class="chat-head">${header('Sohbet', `<span class="e2e-line">${svg('lock')}Uçtan uca şifreli</span>`)}</div>
+    <button class="pin-bar" id="pin-bar" aria-label="Sabitlenmiş mesaja git"></button>
     <div class="chat-list" id="chat-list"><p class="sub" style="text-align:center;padding:40px 0">Mesajlar yükleniyor…</p></div>
     <div class="chat-typing" id="chat-typing"></div>
     <div class="composer" id="composer">
@@ -64,6 +65,7 @@ export async function mount() {
     subscribe();
     drawList(true);
     markRead();
+    loadPin();
   } catch (e) {
     const l = document.getElementById('chat-list');
     if (l) l.innerHTML = `<p class="sub" style="text-align:center;padding:40px 16px">${esc(errText(e))}</p>`;
@@ -155,6 +157,7 @@ function subscribe() {
       const rd = await sb.from('chat_reads').select('*').eq('group_id', S.ctx.group_id);
       C.reads = rd.data || []; drawList(false);
     })
+    .on('broadcast', { event: 'pin' }, () => loadPin())
     .on('broadcast', { event: 'typing' }, ({ payload }) => {
       if (!payload?.uid || payload.uid === me()) return;
       C.typing.set(payload.uid, Date.now()); drawTyping();
@@ -167,7 +170,7 @@ let readT;
 function markRead() {
   clearTimeout(readT);
   readT = setTimeout(async () => {
-    try { await rpc('mark_read'); S.unreadChat = false; updateTabDots(); } catch (_) { /* */ }
+    try { await rpc('mark_read'); S.unreadChat = false; S.unreadCount = 0; updateTabDots(); } catch (_) { /* */ }
   }, 600);
 }
 
@@ -253,13 +256,41 @@ const fmtDur = (ms) => { const s = Math.round((ms || 0) / 1000); return `${Math.
 const linkify = (h) => h.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>')
   .replace(/@([\wçğıöşüÇĞİÖŞÜ]+)/g, '<b class="mention">@$1</b>');
 
+function startReply(id) {
+  C.replyTo = id; drawReply();
+  document.getElementById('msg-in')?.focus();
+}
 function bindList(l) {
   l.querySelectorAll('[data-msg]').forEach((el) => {
-    let t = null;
-    const start = () => { t = setTimeout(() => { t = null; msgMenu(el.dataset.msg); }, 450); };
+    let t = null, x0 = null, y0 = 0, dx = 0, swiping = false, ic = null;
     const cancel = () => { if (t) { clearTimeout(t); t = null; } };
-    el.addEventListener('touchstart', start, { passive: true });
-    el.addEventListener('touchend', cancel); el.addEventListener('touchmove', cancel, { passive: true });
+    el.addEventListener('touchstart', (e) => {
+      const p = e.touches[0];
+      x0 = p.clientX < 24 ? null : p.clientX; y0 = p.clientY; dx = 0; swiping = false; // kenardan kaydırma = geri
+      t = setTimeout(() => { t = null; if (!swiping) msgMenu(el.dataset.msg); }, 450);
+    }, { passive: true });
+    el.addEventListener('touchmove', (e) => {
+      const p = e.touches[0];
+      if (Math.abs(p.clientY - y0) > 8 || Math.abs(p.clientX - (x0 ?? p.clientX)) > 8) cancel();
+      if (x0 == null) return;
+      dx = p.clientX - x0;
+      if (!swiping && Math.abs(p.clientY - y0) > 14) { x0 = null; return; }
+      if (dx > 10) {
+        if (!swiping) { swiping = true; el.classList.add('swiping'); ic = document.createElement('span'); ic.className = 'swipe-ic'; ic.innerHTML = svg('reply'); el.prepend(ic); }
+        const d = Math.min(70, dx);
+        el.style.transform = `translateX(${d}px)`;
+        ic.style.opacity = String(Math.min(1, d / 55));
+      }
+    }, { passive: true });
+    const end = () => {
+      cancel();
+      if (swiping) {
+        el.classList.remove('swiping'); el.style.transform = ''; ic?.remove(); ic = null;
+        if (dx >= 55) { navigator.vibrate?.(10); startReply(el.dataset.msg); }
+      }
+      x0 = null; swiping = false;
+    };
+    el.addEventListener('touchend', end); el.addEventListener('touchcancel', end);
     el.addEventListener('contextmenu', (e) => { e.preventDefault(); msgMenu(el.dataset.msg); });
   });
   l.querySelectorAll('[data-voice]').forEach((el) => bindVoice(el));
@@ -277,6 +308,44 @@ function drawTyping() {
   el.textContent = who.length ? `${who.join(', ')} yazıyor…` : '';
 }
 
+// ------------------------------------------------------------------ sabitlenmiş mesaj
+C.pin = null;
+async function loadPin() {
+  try {
+    const r = await rpc('chat_pin');
+    const id = r?.message || null;
+    if (!id) { C.pin = null; drawPin(); return; }
+    let m = C.list.find((x) => x.id === id);
+    if (!m) {
+      const q = await sb.from('messages').select('*').eq('id', id).maybeSingle();
+      m = q.data;
+      if (m) await decrypt(m);
+    }
+    C.pin = m ? { m, by: r.by } : null;
+  } catch (e) { console.warn(e); C.pin = null; }
+  drawPin();
+}
+function drawPin() {
+  const el = document.getElementById('pin-bar'); if (!el) return;
+  if (!C.pin) { el.innerHTML = ''; return; }
+  const m = C.pin.m; const p = C.plain.get(m.id) || {};
+  const t = m.kind === 'voice' ? '🎤 Sesli mesaj' : p.t || '🔒 Şifreli mesaj';
+  el.innerHTML = `<span class="ic">${svg('pinIt')}</span><span class="grow"><small>SABİT MESAJ · ${esc(nameOf(m.sender))}</small><span class="t">${esc(t)}</span></span>`;
+  el.onclick = () => {
+    const row = document.querySelector(`[data-msg="${m.id}"]`);
+    if (row) { row.scrollIntoView({ behavior: 'smooth', block: 'center' }); row.querySelector('.bubble')?.animate([{ transform: 'scale(1.04)' }, { transform: 'none' }], { duration: 500 }); }
+    else toast('Bu mesaj eski mesajlar arasında');
+  };
+}
+async function setPin(id) {
+  try {
+    await rpc('pin_message', { p_message: id });
+    C.channel?.send({ type: 'broadcast', event: 'pin', payload: {} });
+    await loadPin();
+    toast(id ? 'Mesaj sabitlendi' : 'Sabitleme kaldırıldı');
+  } catch (e) { toast(errText(e)); }
+}
+
 // ------------------------------------------------------------------ mesaj menüsü
 function msgMenu(id) {
   const m = C.list.find((x) => x.id === id); if (!m) return;
@@ -286,13 +355,15 @@ function msgMenu(id) {
   openSheet(`<div class="emoji-row">${EMOJIS.map((e) => `<button class="${myR === e ? 'on' : ''}" data-emo="${e}">${e}</button>`).join('')}</div>
     ${who ? `<p class="small" style="text-align:center">${who}</p>` : ''}
     <button class="btn block" id="mm-reply">${svg('reply')}Yanıtla</button>
+    <button class="btn block" id="mm-pin">${svg('pinIt')}${C.pin?.m?.id === id ? 'Sabitlemeyi kaldır' : 'Sabitle'}</button>
     ${p.t ? `<button class="btn block" id="mm-copy">${svg('copy')}Kopyala</button>` : ''}
     ${m.sender === me() || isAdmin() ? `<button class="btn block danger" id="mm-del">${svg('trash')}Herkesten sil</button>` : ''}`, () => {
     document.querySelectorAll('[data-emo]').forEach((b) => b.onclick = async () => {
       closeSheet();
       try { await rpc('react', { p_message: id, p_emoji: myR === b.dataset.emo ? null : b.dataset.emo }); } catch (e) { toast(errText(e)); }
     });
-    document.getElementById('mm-reply').onclick = () => { closeSheet(); C.replyTo = id; drawReply(); document.getElementById('msg-in')?.focus(); };
+    document.getElementById('mm-reply').onclick = () => { closeSheet(); startReply(id); };
+    document.getElementById('mm-pin').onclick = () => { closeSheet(); setPin(C.pin?.m?.id === id ? null : id); };
     document.getElementById('mm-copy')?.addEventListener('click', async () => { closeSheet(); try { await navigator.clipboard.writeText(p.t); toast('Kopyalandı'); } catch (_) { /* */ } });
     document.getElementById('mm-del')?.addEventListener('click', async () => {
       closeSheet();
@@ -309,7 +380,7 @@ function drawReply() {
   const el = document.getElementById('reply-bar'); if (!el) return;
   if (!C.replyTo) { el.innerHTML = ''; return; }
   const q = C.list.find((x) => x.id === C.replyTo); const qp = q && C.plain.get(q.id);
-  el.innerHTML = `<div class="reply-bar"><div style="flex:1;min-width:0"><b>${esc(nameOf(q?.sender))}</b>
+  el.innerHTML = `<div class="reply-bar">${svg('reply', 'style="width:16px;height:16px;color:var(--accent);flex-shrink:0"')}<div style="flex:1;min-width:0"><b>Yanıtlanıyor: ${esc(q?.sender === me() ? 'kendi mesajın' : nameOf(q?.sender))}</b>
     <span>${esc(q?.kind === 'voice' ? '🎤 Sesli mesaj' : (qp?.t || '').slice(0, 80))}</span></div>
     <button class="icon-btn" style="width:34px;height:34px;border:none" id="reply-x" aria-label="Yanıtı iptal et">${svg('x')}</button></div>`;
   document.getElementById('reply-x').onclick = () => { C.replyTo = null; drawReply(); };

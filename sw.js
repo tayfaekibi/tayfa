@@ -4,7 +4,7 @@
 //   ve uygulama kendini yeniler.
 // - Fotoğraflar da telefonda saklanır, ikinci açılışta internetten tekrar indirilmez.
 // - Bildirime dokununca ilgili ekran açılır.
-const CACHE = 'tayfa-v2.5.0';
+const CACHE = 'tayfa-v3.0.0';
 const PHOTO_CACHE = 'tayfa-foto-v1';
 const ROUTE_CACHE = 'tayfa-yonlendirme';
 const MAX_PHOTOS = 600;
@@ -78,11 +78,16 @@ self.addEventListener('fetch', (e) => {
   })());
 });
 
+// Tanılama için son bildirimin ne zaman geldiğini ve dokunulduğunu kaydet (Profil'de görünür)
+async function note(key, obj) {
+  try { const c = await caches.open(ROUTE_CACHE); await c.put(key, new Response(JSON.stringify({ ...obj, at: Date.now() }))); } catch (_) { /* */ }
+}
+
 self.addEventListener('push', (e) => {
   let data = {};
   try { data = e.data ? e.data.json() : {}; } catch (_) { data = { title: 'Tayfa', body: e.data?.text() || '' }; }
   const title = data.title || 'Tayfa';
-  e.waitUntil(
+  e.waitUntil(Promise.all([
     self.registration.showNotification(title, {
       body: data.body || '',
       icon: 'icons/icon-192.png',
@@ -90,23 +95,28 @@ self.addEventListener('push', (e) => {
       tag: data.tag,
       data: { url: data.url || './' },
     }),
-  );
+    note('last-push', { title, url: data.url || './' }),
+  ]));
 });
 
+// Bildirime dokununca: önce açık uygulamaya hemen "şuraya git" de, sonra öne getir.
+// iPhone'da bazen öne getirme hata verir ya da mesaj kaybolur; bu yüzden gidilecek yer ayrıca kaydedilir
+// ve uygulama uyanınca birkaç kez kontrol eder. Hiçbiri olmazsa uygulamadaki bildirim kutusu yine çalışır.
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
   const target = new URL(e.notification.data?.url || './', self.registration.scope).href;
   e.waitUntil((async () => {
-    // Uygulama uykudaysa mesaj kaybolabilir; gidilecek yeri ayrıca kaydet, uygulama açılınca okusun
-    const rc = await caches.open(ROUTE_CACHE);
-    await rc.put('pending', new Response(target));
+    const saved = note('pending', { url: target });
+    const logged = note('last-click', { url: target });
     const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     const client = all.find((c) => c.url.startsWith(self.registration.scope));
     if (client) {
+      try { client.postMessage({ type: 'open', url: target }); } catch (_) { /* */ }
       try { await client.focus(); } catch (_) { /* */ }
-      client.postMessage({ type: 'open', url: target });
-      return;
+      try { if (client.url !== target && 'navigate' in client) await client.navigate(target); } catch (_) { /* */ }
+    } else {
+      try { await self.clients.openWindow(target); } catch (_) { /* */ }
     }
-    await self.clients.openWindow(target);
+    await Promise.allSettled([saved, logged]);
   })());
 });

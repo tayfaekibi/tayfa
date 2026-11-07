@@ -60,6 +60,8 @@ async function signed(paths) {
   if (need.length) saveUrls();
   return (p) => urlCache.get(p)?.url || '';
 }
+// Ana sayfadaki "geçen yıl bugün" kartı için küçük resim bağlantıları
+export async function thumbUrls(paths) { return signed(paths); }
 // Haritayı önceden yükle (Anılar'a girmeden, boşta)
 export function warmUp() {
   if (window.maplibregl) return;
@@ -666,7 +668,7 @@ async function knownPlaces() {
   return places;
 }
 
-async function pickLocation(album, onPick) {
+export async function pickLocation(album, onPick) {
   // album: konumu seçilecek albüm ya da fotoğraf (lat/lng alanları olan herhangi bir kayıt)
   openSheet(`${sheetHead('Konum seç')}
     <div id="pick-known"></div>
@@ -682,7 +684,7 @@ async function pickLocation(album, onPick) {
     let mk = null, ll = null;
     const choose = (lngLat, label, fly) => {
       ll = { lng: lngLat.lng, lat: lngLat.lat };
-      if (!mk) mk = new ml.Marker({ color: '#B8431D' }).setLngLat(ll).addTo(m); else mk.setLngLat(ll);
+      if (!mk) mk = new ml.Marker({ color: '#C9452A' }).setLngLat(ll).addTo(m); else mk.setLngLat(ll);
       document.getElementById('pick-ok').disabled = false;
       const h = document.getElementById('pick-hint');
       if (h) h.textContent = label ? `Seçilen yer: ${label}` : 'Haritada seçtiğin nokta kullanılacak.';

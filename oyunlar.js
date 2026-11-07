@@ -1,7 +1,7 @@
 // Oyunlar sekmesi ve tavla masası
 import {
   sb, S, esc, svg, avatar, toast, errText, rpc, openSheet, closeSheet, sheetHead,
-  me, nameOf, activeMembers, header, bindHeader, goMain, updateTabDots,
+  me, nameOf, activeMembers, header, bindHeader, goMain, updateTabDots, route,
 } from './app.js';
 import * as T from './supabase/functions/_shared/tavla.js';
 import * as Sohbet from './sohbet.js';
@@ -10,8 +10,10 @@ const G = { games: [], game: null, channel: null, done: [], sel: null, busy: fal
 
 export async function loadMyTurns() {
   if (S.ctx.status !== 'active') return;
-  const { data } = await sb.from('games').select('id').eq('group_id', S.ctx.group_id).eq('status', 'active').eq('turn', me());
+  const { data } = await sb.from('games').select('id, players, state, match_to').eq('group_id', S.ctx.group_id).eq('status', 'active').eq('turn', me())
+    .order('updated_at', { ascending: false });
   S.myTurnGames = data?.length || 0;
+  S.myTurnList = data || [];
 }
 
 // ------------------------------------------------------------------ sekme
@@ -27,7 +29,8 @@ export async function mount() {
     if (error) throw error;
     G.games = data || [];
   } catch (e) { toast(errText(e)); }
-  S.myTurnGames = G.games.filter((g) => g.status === 'active' && g.turn === me()).length;
+  S.myTurnList = G.games.filter((g) => g.status === 'active' && g.turn === me());
+  S.myTurnGames = S.myTurnList.length;
   updateTabDots();
   drawTab();
 }
@@ -85,22 +88,25 @@ function pickOpponent() {
 }
 
 function openGame(id) {
-  S.view = 'game'; S.gameId = id;
   history.replaceState(null, '', '#oyun/' + id);
-  renderGame();
+  route('#oyun/' + id);
 }
 
 // ------------------------------------------------------------------ tavla masası
 export async function renderGame() {
   const $app = document.getElementById('app');
-  $app.innerHTML = `<div class="screen"><main class="content no-tabs game-screen">
-    <div style="display:flex;justify-content:space-between;align-items:center">
-      <button class="back" id="g-back">${svg('back')}Oyunlar</button>
+  $app.innerHTML = `<div class="screen enter"><main class="content no-tabs game-screen">
+    <div class="g-top">
+      <button class="icon-btn" id="g-back" aria-label="Oyunlara dön">${svg('back')}</button>
+      <div class="grow" id="g-title"><h1>Tavla</h1></div>
+      <button class="icon-btn chat-n-btn" id="g-gen" aria-label="Genel sohbet">${svg('chat')}</button>
       <button class="icon-btn" id="g-menu" aria-label="Oyun seçenekleri">${svg('dots')}</button>
     </div>
-    <div id="g-body"><p class="sub">Masa hazırlanıyor…</p></div></main></div>`;
-  document.getElementById('g-back').onclick = () => { closeGame(); goMain('game'); };
+    <div id="g-body" style="display:flex;flex-direction:column;gap:12px"><p class="sub">Masa hazırlanıyor…</p></div></main></div>`;
+  document.getElementById('g-back').onclick = () => goMain('game');
+  document.getElementById('g-gen').onclick = () => route('#sohbet');
   document.getElementById('g-menu').onclick = gameMenu;
+  drawChatCount();
   startPresence(S.gameId);
   await reloadGame();
   if (G.game) Sohbet.gameChatLoad(G.game, () => drawChatBar()).then(drawChatBar).catch((e) => console.warn(e));
@@ -114,9 +120,17 @@ export async function renderGame() {
       drawGame();
     }).subscribe();
 }
-function closeGame() {
+export function closeGame() {
   if (G.channel) { sb.removeChannel(G.channel); G.channel = null; }
   stopPresence();
+}
+// Oyun ekranındayken genel sohbete gelen mesaj sayısı (bildirim yerine)
+export function drawChatCount() {
+  const b = document.getElementById('g-gen'); if (!b) return;
+  const n = S.unreadCount || 0;
+  b.querySelector('.n')?.remove();
+  if (n) b.insertAdjacentHTML('beforeend', `<span class="n">${n > 99 ? '99+' : n}</span>`);
+  b.setAttribute('aria-label', n ? `Genel sohbet, ${n} yeni mesaj` : 'Genel sohbet');
 }
 
 // Oyun ekranı açıkken sunucuya "buradayım" de: bu oyunla ilgili bildirim gelmesin
@@ -186,6 +200,28 @@ function drawChatBar() {
   document.getElementById('g-chat').onclick = () => Sohbet.openGameChat(G.game);
 }
 
+// Seçili taşın iki zarın toplamıyla (çiftte en uzağa) gidebileceği yerler. Ara nokta açık değilse gösterilmez.
+function sumTargets(legal, done, sel) {
+  const out = new Map(); // to → hamle dizisi
+  const walk = (path, from) => {
+    for (const m of T.nextSteps(legal, done.concat(path)).filter((x) => String(x.from) === String(from))) {
+      const p2 = path.concat([m]);
+      if (p2.length >= 2) {
+        const k = String(m.to);
+        if (!out.has(k) || out.get(k).length < p2.length) out.set(k, p2);
+      }
+      if (m.to !== 'off') walk(p2, m.to);
+    }
+  };
+  walk([], sel);
+  const res = [...out.entries()].map(([to, seq]) => ({ to, seq }));
+  if (!res.length) return [];
+  // çift zarda sadece en uzak noktayı göster (kafa karıştırmasın)
+  const isDouble = G.game.state.dice.length === 4;
+  if (isDouble) { const max = Math.max(...res.map((r) => r.seq.length)); return res.filter((r) => r.seq.length === max); }
+  return res;
+}
+
 function drawGame() {
   const box = document.getElementById('g-body'); const g = G.game;
   if (!box || !g) return;
@@ -195,6 +231,8 @@ function drawGame() {
   const opp = g.players[view === 0 ? 1 : 0];
   const myTurn = g.status === 'active' && p >= 0 && st.turn === p;
   const rolled = myTurn && st.dice?.length > 0;
+  const tt = document.getElementById('g-title');
+  if (tt) tt.innerHTML = `<h1>${p >= 0 ? `${esc(nameOf(opp))} ile tavla` : `${esc(nameOf(g.players[0]))} – ${esc(nameOf(g.players[1]))}`}</h1><p class="small">${g.match_to} sayılık maç · ${st.hand || 1}. el</p>`;
 
   let base = { board: st.board, bar: st.bar, off: st.off };
   let legal = null, next = [];
@@ -204,10 +242,13 @@ function drawGame() {
     next = T.nextSteps(legal, G.done);
   }
   const usedDice = G.done.map((m) => m.die);
-  const diceLeft = rolled ? (() => { const d = st.dice.slice(); usedDice.forEach((u) => { const i = d.indexOf(u); if (i >= 0) d.splice(i, 1); }); return d; })() : [];
   const fromSet = new Set(next.map((m) => String(m.from)));
   const targets = G.sel != null ? next.filter((m) => String(m.from) === String(G.sel)) : [];
   const targetSet = new Set(targets.map((m) => String(m.to)));
+  const sums = G.sel != null && rolled ? sumTargets(legal, G.done, G.sel).filter((r) => !targetSet.has(r.to)) : [];
+  const sumMap = new Map(sums.map((r) => [r.to, r]));
+  const dieOf = (k) => { const m = targets.filter((x) => String(x.to) === k).sort((a, b) => a.die - b.die)[0]; return m ? m.die : ''; };
+  const sumOf = (k) => sumMap.get(k)?.seq.reduce((n, m) => n + m.die, 0) || '';
   const lastTo = new Set((st.last?.moves || []).map((m) => String(m.to)));
   const complete = rolled && legal && G.done.length === legal.maxLen;
 
@@ -219,11 +260,14 @@ function drawGame() {
     const color = v > 0 ? 0 : 1;
     const isFrom = myTurn && fromSet.has(String(i));
     const isTarget = targetSet.has(String(i));
+    const isSum = sumMap.has(String(i));
     const sel = String(G.sel) === String(i);
     let checkers = '';
     for (let k = 0; k < Math.min(n, 5); k++) checkers += `<span class="ck c${color} ${sel && k === Math.min(n, 5) - 1 ? 'sel' : ''}"></span>`;
     if (n > 5) checkers += `<span class="ck-n">${n}</span>`;
-    return `<button class="pt ${top ? 'top' : 'bot'} ${(pos % 2) ? 'odd' : 'even'} ${isFrom ? 'can' : ''} ${isTarget ? 'tgt' : ''} ${lastTo.has(String(i)) && !rolled ? 'last' : ''}" data-pt="${i}" aria-label="Nokta ${i + 1}">
+    if (isTarget) checkers += `<span class="mk g">${dieOf(String(i))}</span>`;
+    else if (isSum) checkers += `<span class="mk r">${sumOf(String(i))}</span>`;
+    return `<button class="pt ${top ? 'top' : 'bot'} ${(pos % 2) ? 'odd' : 'even'} ${isFrom ? 'can' : ''} ${isTarget ? 'tgt' : ''} ${isSum ? 'tgt2' : ''} ${lastTo.has(String(i)) && !rolled ? 'last' : ''}" data-pt="${i}" aria-label="Nokta ${i + 1}${isTarget ? ', tek zarla gidilebilir' : isSum ? ', iki zar toplamıyla gidilebilir' : ''}">
       <span class="tri"></span><span class="stack">${checkers}</span></button>`;
   };
   const half = (arr, top) => `<div class="half">${arr.map((x) => point(x, top)).join('')}</div>`;
@@ -236,35 +280,48 @@ function drawGame() {
   const meIdx = view, oppIdx = 1 - view;
   const barCan = myTurn && fromSet.has('bar');
   const offTgt = targetSet.has('off');
+  const offSum = sumMap.has('off');
   const die = (n, used) => `<span class="die ${used ? 'used' : ''}">${'⚀⚁⚂⚃⚄⚅'[n - 1]}</span>`;
   const lastInfo = st.last ? (st.last.resign ? `${esc(nameOf(g.players[st.last.by]))} pes etti`
     : `${esc(nameOf(g.players[st.last.by]))} ${st.last.roll ? st.last.roll.join('-') + ' attı' : ''}${st.last.pass ? ', oynayamadı' : ''}`) : '';
 
   let status = '';
-  if (g.status === 'finished') status = `<div class="g-status win">${g.winner === me() ? '🏆 Maçı kazandın!' : `${esc(nameOf(g.winner))} maçı kazandı`}</div>`;
+  if (g.status === 'finished') {
+    const won = g.winner === me();
+    const mine = p >= 0 ? st.score[p] : st.score[0], theirs = p >= 0 ? st.score[1 - p] : st.score[1];
+    status = `<div class="g-end"><span class="cup">${svg('trophy')}</span>
+      <h2>${p === -1 ? `${esc(nameOf(g.winner))} kazandı` : won ? 'Kazandın!' : `${esc(nameOf(g.winner))} kazandı`}</h2>
+      <p>${p >= 0 ? `Skor ${mine}–${theirs}` : `Skor ${st.score[0]}–${st.score[1]}`} · ${st.hand || 1} el oynandı</p>
+      ${p >= 0 ? `<button class="btn primary" id="g-again">${svg('again')}Rövanş</button>` : ''}
+      <button class="btn" id="g-home">Oyunlara dön</button>
+      ${p >= 0 ? '<p style="font-size:12px">Rövanşa basınca rakibine davet gider</p>' : ''}</div>`;
+  }
   else if (p === -1) status = `<div class="g-status">Sıra ${esc(nameOf(g.players[st.turn]))}'de</div>`;
-  else if (!myTurn) status = `<div class="g-status">Sıra ${esc(nameOf(opp))}'de · hamlesini yapınca bildirim gelecek</div>`;
-  else if (!rolled) status = `<button class="btn primary block big" id="g-roll" ${G.busy ? 'disabled' : ''}>🎲 Zar at</button>`;
+  else if (!myTurn) status = `<div class="g-status">Sıra ${esc(nameOf(opp))}'de · hamlesini yapınca haber gelecek</div>`;
+  else if (!rolled) status = `<button class="btn primary block big" id="g-roll" ${G.busy ? 'disabled' : ''}>${svg('dice')}Zar at</button>`;
   else status = `<div class="g-actions">
       <div class="dice">${(() => { const u = usedDice.slice(); return st.dice.map((d) => { const i = u.indexOf(d); if (i >= 0) { u.splice(i, 1); return die(d, true); } return die(d, false); }).join(''); })()}</div>
       <button class="btn small" id="g-undo" ${G.done.length ? '' : 'disabled'}>Geri al</button>
       <button class="btn small primary" id="g-send" ${complete && !G.busy ? '' : 'disabled'}>${complete ? 'Hamleyi gönder' : `${legal.maxLen - G.done.length} hamle kaldı`}</button>
     </div>`;
 
+  const turnAv = (idx) => g.status === 'active' && st.turn === idx ? 'turn' : '';
   box.innerHTML = `
-    <div class="g-players">
-      <div class="g-pl">${avatar(nameOf(opp), opp)}<span>${esc(nameOf(opp))}</span><b>${st.score[oppIdx]}</b></div>
-      <span class="small">${g.match_to} sayılık · ${st.hand || 1}. el</span>
-      <div class="g-pl me"><b>${st.score[meIdx]}</b><span>${p === -1 ? esc(nameOf(g.players[0])) : 'Sen'}</span>${avatar(nameOf(g.players[meIdx]), g.players[meIdx])}</div>
+    <div class="g-score">
+      ${avatar(nameOf(opp), opp).replace('class="av ', `class="av ${turnAv(oppIdx)} `)}<span class="nm">${esc(nameOf(opp))}</span>
+      <b>${st.score[oppIdx]} <i>–</i> ${st.score[meIdx]}</b>
+      <span class="nm r">${p === -1 ? esc(nameOf(g.players[0])) : 'Sen'}</span>${avatar(nameOf(g.players[meIdx]), g.players[meIdx]).replace('class="av ', `class="av ${turnAv(meIdx)} `)}
     </div>
+    ${g.status === 'active' && p >= 0 ? `<span class="g-turn ${myTurn ? '' : 'wait'}">${myTurn ? (rolled ? (G.sel != null ? 'Gideceği yere dokun' : 'Taşını seç') : 'Sıra sende · zar at') : `Sıra ${esc(nameOf(opp))}'de`}</span>` : ''}
     <div class="board ${G.busy ? 'busy' : ''}">
       <div class="row">${half(TOP.slice(0, 6), true)}<div class="bar-col"><div class="bar-slot">${barStack(oppIdx)}</div></div>${half(TOP.slice(6), true)}
         <div class="off-col"><div class="off-slot">${base.off[oppIdx] ? `<span class="off-n c${oppIdx}">${base.off[oppIdx]}</span>` : ''}</div></div></div>
       <div class="mid">${rolled ? '' : (st.last?.roll ? `<span class="mid-dice">${st.last.roll.map((d) => die(d)).join('')}</span>` : '')}</div>
       <div class="row">${half(BOTTOM.slice(0, 6), false)}<button class="bar-col ${barCan ? 'can' : ''} ${String(G.sel) === 'bar' ? 'selbar' : ''}" data-pt="bar" aria-label="Kırık taşlar"><div class="bar-slot">${barStack(meIdx)}</div></button>${half(BOTTOM.slice(6), false)}
-        <button class="off-col ${offTgt ? 'tgt' : ''}" data-pt="off" aria-label="Taş topla"><div class="off-slot">${base.off[meIdx] ? `<span class="off-n c${meIdx}">${base.off[meIdx]}</span>` : ''}</div></button></div>
+        <button class="off-col ${offTgt ? 'tgt' : offSum ? 'tgt2' : ''}" data-pt="off" aria-label="Taş topla"><div class="off-slot">${base.off[meIdx] ? `<span class="off-n c${meIdx}">${base.off[meIdx]}</span>` : ''}</div></button></div>
     </div>
-    ${lastInfo && !rolled ? `<p class="small" style="text-align:center">${lastInfo}</p>` : ''}
+    ${rolled && G.sel != null ? '<div class="g-legend"><span><i class="g"></i>Yeşil: tek zar</span><span><i class="r"></i>Kırmızı: iki zar toplamı</span></div>' : ''}
+    ${lastInfo && !rolled && g.status === 'active' ? `<p class="small" style="text-align:center">${lastInfo}</p>` : ''}
     ${status}
     ${myTurn && rolled && legal.maxLen === 0 ? '<p class="small" style="text-align:center">Oynanacak hamle yok.</p>' : ''}
     ${p >= 0 ? '<div id="g-chatbar"></div>' : ''}`;
@@ -273,16 +330,37 @@ function drawGame() {
   document.getElementById('g-roll')?.addEventListener('click', () => call('roll'));
   document.getElementById('g-undo')?.addEventListener('click', () => { G.done.pop(); G.sel = null; drawGame(); });
   document.getElementById('g-send')?.addEventListener('click', () => call('move', { moves: G.done }));
+  document.getElementById('g-home')?.addEventListener('click', () => goMain('game'));
+  document.getElementById('g-again')?.addEventListener('click', rematch);
   if (!rolled) return;
   box.querySelectorAll('[data-pt]').forEach((el) => el.onclick = () => {
     const k = el.dataset.pt;
     if (G.sel != null && targetSet.has(k)) {
       const mv = targets.filter((m) => String(m.to) === k).sort((a, b) => a.die - b.die)[0];
       G.done.push(mv); G.sel = null;
-      // tek seçenek kaldıysa ve aynı taş devam edebiliyorsa seçili tut
+      drawGame(); return;
+    }
+    if (G.sel != null && sumMap.has(k)) { // iki zarı birden oyna
+      G.done.push(...sumMap.get(k).seq); G.sel = null;
       drawGame(); return;
     }
     if (fromSet.has(k)) { G.sel = String(G.sel) === k ? null : (k === 'bar' ? 'bar' : +k); drawGame(); return; }
     if (G.sel != null) { G.sel = null; drawGame(); }
   });
+}
+
+// Rövanş: aynı rakiple, aynı uzunlukta yeni maç
+async function rematch() {
+  const g = G.game; if (!g) return;
+  const opp = g.players.find((u) => u !== me());
+  const btn = document.getElementById('g-again'); if (btn) btn.disabled = true;
+  try {
+    const id = await rpc('create_game', { p_opponent: opp, p_kind: 'tavla', p_match_to: g.match_to });
+    openGame(id);
+    toast('Rövanş başladı, rakibine haber gitti');
+  } catch (e) {
+    const { data } = await sb.from('games').select('id').eq('status', 'active').contains('players', [me(), opp]).limit(1);
+    if (data?.[0]) { openGame(data[0].id); return; }
+    toast(errText(e)); if (btn) btn.disabled = false;
+  }
 }
