@@ -276,8 +276,10 @@ async function drawAlbum() {
       ${isAdmin() && !isLoose(a) ? `<button class="icon-btn" id="al-menu" aria-label="Albüm seçenekleri">${svg('dots')}</button>` : ''}
     </header>
     ${isAdmin() ? (A.selecting
-      ? `<div class="row2"><button class="btn primary" id="al-move" ${A.selected.size ? '' : 'disabled'}>Albüme taşı (${A.selected.size})</button><button class="btn" id="al-selx">Vazgeç</button></div>`
-      : `<div class="row2"><button class="btn primary" id="al-add">${svg('upload')}Fotoğraf ekle</button>${A.photos.length ? `<button class="btn" id="al-sel">Seç ve taşı</button>` : '<span></span>'}</div>`) : ''}
+      ? `<p class="small" style="margin-bottom:-6px">${A.selected.size ? `${A.selected.size} fotoğraf seçildi` : 'Fotoğraflara dokunarak seç'}</p>
+        <div class="row2"><button class="btn primary" id="al-move" ${A.selected.size ? '' : 'disabled'}>Albüme taşı</button><button class="btn primary" id="al-ploc" ${A.selected.size ? '' : 'disabled'}>${svg('pin')}Konum ver</button></div>
+        <button class="btn block" id="al-selx">Vazgeç</button>`
+      : `<div class="row2"><button class="btn primary" id="al-add">${svg('upload')}Fotoğraf ekle</button>${A.photos.length ? `<button class="btn" id="al-sel">Seç</button>` : '<span></span>'}</div>`) : ''}
     ${a.lat == null && isAdmin() && !isLoose(a) ? `<button class="banner" id="al-loc"><span class="pip"></span><span class="grow">Albümün konumu yok, haritada görünmüyor</span><span>Konum seç</span></button>` : ''}
     ${A.photos.length ? `<div class="photo-grid">${A.photos.map((p, i) => `
       <button class="photo-tile nosave ${A.selected.has(p.id) ? 'picked' : ''} ${A.selecting ? 'picking' : ''}" data-ph="${i}" style="background-image:url('${url(p.thumb_path)}')" aria-label="Fotoğraf ${i + 1}">
@@ -294,6 +296,14 @@ async function drawAlbum() {
   document.getElementById('al-sel')?.addEventListener('click', () => { A.selecting = true; A.selected = new Set(); drawAlbum(); });
   document.getElementById('al-selx')?.addEventListener('click', () => { A.selecting = false; A.selected = new Set(); drawAlbum(); });
   document.getElementById('al-move')?.addEventListener('click', () => moveSheet([...A.selected], () => { A.selecting = false; renderAlbum(); }));
+  document.getElementById('al-ploc')?.addEventListener('click', () => {
+    const ids = [...A.selected];
+    const first = A.photos.find((p) => A.selected.has(p.id) && p.lat != null) || (a.lat != null ? a : {});
+    pickLocation({ lat: first.lat ?? null, lng: first.lng ?? null }, async (ll) => {
+      const n = await rpc('set_photos_location', { p_photos: ids, p_lat: ll.lat, p_lng: ll.lng });
+      toast(`${n} fotoğrafa konum verildi`); A.selecting = false; renderAlbum();
+    });
+  });
   document.getElementById('al-loc')?.addEventListener('click', () => pickLocation(a, async (ll) => {
     await rpc('update_album', { p_album: a.id, p_title: a.title, p_place: a.place || '', p_lat: ll.lat, p_lng: ll.lng, p_taken_on: a.taken_on });
     toast('Konum kaydedildi'); renderAlbum();
@@ -307,12 +317,17 @@ function albumMenu() {
   openSheet(`${sheetHead(esc(a.title))}
     <button class="btn block" id="am-edit">Albümü düzenle</button>
     <button class="btn block" id="am-loc">${svg('map')}Konumu değiştir</button>
+    ${a.lat != null && A.photos.some((p) => p.lat == null) ? `<button class="btn block" id="am-ptl">${svg('pin')}Albüm konumunu konumsuz ${A.photos.filter((p) => p.lat == null).length} fotoğrafa ver</button>` : ''}
     <button class="btn block danger" id="am-del">${svg('trash')}Albümü sil</button>`, () => {
     document.getElementById('am-edit').onclick = () => { closeSheet(); showAlbumForm(a); };
     document.getElementById('am-loc').onclick = () => { closeSheet(); pickLocation(a, async (ll) => {
       await rpc('update_album', { p_album: a.id, p_title: a.title, p_place: a.place || '', p_lat: ll.lat, p_lng: ll.lng, p_taken_on: a.taken_on });
       toast('Konum kaydedildi'); renderAlbum();
     }); };
+    document.getElementById('am-ptl')?.addEventListener('click', async () => {
+      try { const n = await rpc('album_location_to_photos', { p_album: a.id }); closeSheet(); toast(`${n} fotoğrafa albümün konumu verildi`); renderAlbum(); }
+      catch (e) { toast(errText(e)); }
+    });
     document.getElementById('am-del').onclick = async () => {
       if (!confirm(`"${a.title}" albümü ve içindeki ${A.photos.length} fotoğraf herkes için silinecek. Emin misin?`)) return;
       try {

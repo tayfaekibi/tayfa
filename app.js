@@ -9,6 +9,16 @@ export const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
 });
 
+// ------------------------------------------------------------------ tema (açık / koyu)
+const THEME_KEY = 'tayfa-tema';
+function applyTheme(t) {
+  const dark = t === 'koyu';
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#0F1A24' : '#F4F1EC');
+}
+const getTheme = () => { try { return localStorage.getItem(THEME_KEY) || 'acik'; } catch (_) { return 'acik'; } };
+applyTheme(getTheme());
+
 // ------------------------------------------------------------------ yardımcılar
 const $app = document.getElementById('app');
 const $sheet = document.getElementById('sheet-root');
@@ -58,6 +68,12 @@ const ICON = {
   snow: '<path d="M7 15h10a4 4 0 0 0 0-8 5.5 5.5 0 0 0-10.6 1.7A3.2 3.2 0 0 0 7 15z"/><path d="M9 19h.01M13 19h.01M17 19h.01M11 21h.01M15 21h.01"/>',
   storm: '<path d="M7 15h10a4 4 0 0 0 0-8 5.5 5.5 0 0 0-10.6 1.7A3.2 3.2 0 0 0 7 15z"/><path d="M12 15l-2 4h3l-2 3"/>',
   fog: '<path d="M4 10h16M6 14h12M8 18h8"/>',
+  muted: '<path d="M11 5L6 9H3v6h3l5 4z"/><path d="M22 9l-6 6M16 9l6 6"/>',
+  sound: '<path d="M11 5L6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/>',
+  tavla: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M6 4l1.5 6L9 4M10.5 4l1.5 6 1.5-6M15 4l1.5 6L18 4M6 20l1.5-6L9 20M10.5 20l1.5-6 1.5 6M15 20l1.5-6 1.5 6"/>',
+  spade: '<path d="M12 3c3 4 7 6.5 7 10a4 4 0 0 1-6.3 3.3L14 21h-4l1.3-4.7A4 4 0 0 1 5 13c0-3.5 4-6 7-10z"/>',
+  crown: '<path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 10H5z"/><path d="M5 21h14"/>',
+  tile: '<rect x="6" y="3" width="12" height="18" rx="2.5"/><path d="M10.5 9.5c0-1 .7-1.7 1.6-1.7s1.6.7 1.6 1.6c0 1.6-3.2 2.4-3.2 4.6h3.3"/><circle cx="12" cy="17.5" r="1" fill="currentColor"/>',
 };
 const svg = (n, extra = '') => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" ${extra}>${ICON[n]}</svg>`;
 
@@ -329,7 +345,7 @@ async function loadData() {
   const since = new Date(Date.now() - 6 * 3600 * 1000).toISOString();
   const [ev, mem] = await Promise.all([
     sb.from('events').select('*').eq('group_id', S.ctx.group_id).gte('starts_at', since).order('starts_at'),
-    sb.from('members').select('user_id, display_name, role, status, created_at, chat_notify').eq('group_id', S.ctx.group_id),
+    sb.from('members').select('*').eq('group_id', S.ctx.group_id),
   ]);
   if (ev.error) throw ev.error;
   if (mem.error) throw mem.error;
@@ -396,12 +412,12 @@ async function fetchWeather(e) {
     return w;
   } catch (_) { return null; }
 }
-const wxChip = (w) => w ? `<span class="wx">${svg(w.icon)}${w.t}° · ${esc(w.text)}</span>` : '';
+const wxChip = (w, short) => w ? `<span class="wx" title="${esc(w.text)}">${svg(w.icon)}${w.t}°${short ? '' : ' · ' + esc(w.text)}</span>` : '';
 function fillWeather() {
   document.querySelectorAll('[data-wx]').forEach(async (el) => {
     const e = S.events.find((x) => x.id === el.dataset.wx); if (!e) return;
     const w = await weatherFor(e);
-    if (w && el.isConnected) el.innerHTML = wxChip(w);
+    if (w && el.isConnected) el.innerHTML = wxChip(w, !!el.dataset.short);
   });
 }
 const isAdmin = () => S.ctx.role === 'admin' && S.ctx.status === 'active';
@@ -719,7 +735,7 @@ function header(title, subtitle, opts = {}) {
     ? `<div class="brand"><img src="icons/icon-192.png" alt=""><b>Tayfa</b></div>`
     : `<div style="flex:1;min-width:0"><h1>${title}</h1>${subtitle ? `<p class="sub" style="margin-top:2px">${subtitle}</p>` : ''}</div>`;
   return `<header class="topbar">${left}
-    <div class="topbar-actions">
+    <div class="topbar-actions">${opts.extra || ''}
       <button class="icon-btn" id="h-bell" aria-label="Bildirimler">${svg('bell')}</button>
       ${isAdmin() ? `<button class="icon-btn" id="h-admin" aria-label="Yönetim">${svg('shield')}${adminDot}</button>` : ''}
       <button class="me-btn" id="h-me" aria-label="Profil">${esc(initialOf(S.ctx.display_name))}</button>
@@ -748,10 +764,11 @@ function heroCard(e) {
   const parts = [];
   if (yes.length) parts.push(`${yes.length} kişi geliyor`);
   if (waiting) parts.push(`${waiting} kişi bekleniyor`);
-  return `<section class="hero" id="ev-${e.id}">
-    <div class="hero-k"><span>SIRADAKİ PLAN · ${when}</span><span data-wx="${e.id}">${wxChip(WX.get(e.id))}</span></div>
-    <div><h2>${esc(e.title)}</h2><p class="hero-sub">${esc(fmt.long(d))}${e.place ? ' · ' + esc(e.place) : ''}</p></div>
-    ${e.note ? `<p class="ev-note" style="color:#E3EAF0">${esc(e.note)}</p>` : ''}
+  return `<section class="next" id="ev-${e.id}">
+    <div class="next-k"><span>SIRADAKİ PLAN · ${when}</span><span data-wx="${e.id}" data-short="1">${wxChip(WX.get(e.id), true)}</span></div>
+    <div class="ev-head">${dateBox(e)}<div style="flex:1;min-width:0"><h2>${esc(e.title)}</h2>
+      <div class="ev-meta"><span>${svgInline('clock')}${esc(fmt.time(d))}</span>${e.place ? `<span>${svgInline('pin')}${esc(e.place)}</span>` : ''}</div></div></div>
+    ${e.note ? `<p class="ev-note">${esc(e.note)}</p>` : ''}
     <button class="people" data-who="${e.id}" style="border:none;background:none;padding:0;text-align:left">
       <span class="avatars">${yes.slice(0, 6).map((r) => avatar(nameOf(r.user_id), r.user_id)).join('')}</span>
       <span>${parts.join(' · ') || 'Henüz cevap yok'}</span></button>
@@ -759,12 +776,32 @@ function heroCard(e) {
       <button class="btn ${mine === 'yes' ? 'ok-on' : 'primary'}" data-rsvp="${e.id}" data-a="yes">${mine === 'yes' ? '✓ Geliyorum' : 'Geliyorum'}</button>
       <button class="btn ${mine === 'no' ? 'no-on' : ''}" data-rsvp="${e.id}" data-a="no">${mine === 'no' ? '✓ Gelemem' : 'Gelemem'}</button>
     </div>
-    <div class="hero-links">
+    <div class="links">
       <button class="btn small" data-com="${e.id}">${svg('comment')}Yorumlar${S.commentCounts?.[e.id] ? ' · ' + S.commentCounts[e.id] : ''}</button>
       ${isAdmin() ? `<button class="btn small" data-del="${e.id}">Planı sil</button>` : ''}
     </div>
   </section>`;
 }
+const SAIL = '<svg class="logo" viewBox="0 0 120 120" aria-hidden="true"><rect width="120" height="120" rx="27" fill="#FFFFFF" fill-opacity="0.1"/><path d="M60 22 L60 78 L30 78 Z" fill="#FFFFFF"/><path d="M66 30 L66 78 L90 78 Z" fill="#FF7A59"/><path d="M26 86 H94 L86 96 H34 Z" fill="#FFFFFF"/></svg>';
+function topBlock() {
+  const first = (S.ctx.display_name || '').split(' ')[0];
+  const today = new Intl.DateTimeFormat('tr-TR', { weekday: 'long', day: 'numeric', month: 'long', timeZone: TZ }).format(new Date());
+  const act = activeMembers();
+  const others = act.filter((m) => m.user_id !== me());
+  const adminDot = pendingMembers().length + pendingEvents().length > 0 ? '<span class="dot"></span>' : '';
+  return `<section class="top">
+    <header class="top-bar">${SAIL}<b>Tayfa</b>
+      <button class="icon-btn" id="h-bell" aria-label="Bildirimler">${svg('bell')}</button>
+      ${isAdmin() ? `<button class="icon-btn" id="h-admin" aria-label="Yönetim">${svg('shield')}${adminDot}</button>` : ''}
+      <button class="me-btn" id="h-me" aria-label="Profil">${esc(initialOf(S.ctx.display_name))}</button>
+    </header>
+    <div><p class="top-date">${esc(today.charAt(0).toLocaleUpperCase('tr-TR') + today.slice(1))}</p>
+      <h1 class="top-hi">${greeting()}, ${esc(first)}</h1></div>
+    ${others.length ? `<div class="top-people"><span class="avatars">${others.slice(0, 6).map((m) => avatar(m.display_name, m.user_id)).join('')}</span>
+      <span>${esc(S.ctx.group_name || 'Tayfa')} · ${act.length} kişi</span></div>` : ''}
+  </section>`;
+}
+
 function turnStrip() {
   const list = S.myTurnList || [];
   if (!list.length) return '';
@@ -791,22 +828,26 @@ function otdCard() {
 }
 
 function homeView() {
-  const first = (S.ctx.display_name || '').split(' ')[0];
   const upcoming = S.events.filter((e) => e.status === 'approved');
   const myPending = S.events.filter((e) => e.status === 'pending' && e.created_by === me());
   const waitCount = pendingMembers().length + pendingEvents().length;
-  const today = new Intl.DateTimeFormat('tr-TR', { weekday: 'long', day: 'numeric', month: 'long', timeZone: TZ }).format(new Date());
-  let h = header('', '', { brand: true });
-  h += `<p class="greet">${greeting()} ${esc(first)} · <b>${esc(today)}</b></p>`;
+  let h = topBlock();
+  let o = '';
+  if (!upcoming.length) {
+    o += `<div class="next"><div class="empty">${svg('cal')}<b style="color:var(--ink)">Henüz plan yok</b><span>${isAdmin() ? 'İlk planı sen aç.' : 'Bir plan öner, yönetici onaylayınca herkese duyurulsun.'}</span></div></div>`;
+  } else o += heroCard(upcoming[0]);
   if (isAdmin() && waitCount) {
     const parts = [];
     if (pendingEvents().length) parts.push(`${pendingEvents().length} plan`);
     if (pendingMembers().length) parts.push(`${pendingMembers().length} üye`);
-    h += `<button class="banner" id="go-admin"><span class="pip"></span><span class="grow">${parts.join(' ve ')} onayını bekliyor</span><span>İncele</span></button>`;
+    o += `<button class="banner" id="go-admin"><span class="pip"></span><span class="grow">${parts.join(' ve ')} onayını bekliyor</span><span>İncele</span></button>`;
   }
   if (pushState() !== 'granted') {
-    h += `<button class="banner" id="go-push" style="background:var(--accent-soft);border-color:#F3D9CC;color:var(--accent-ink)"><span class="pip" style="background:var(--accent)"></span><span class="grow">${pushState() === 'needs-install' ? 'Bildirim almak için Tayfa\'yı ana ekrana ekle' : 'Yeni planlardan haberdar olmak için bildirimleri aç'}</span><span>Aç</span></button>`;
+    o += `<button class="banner" id="go-push" style="background:var(--accent-soft);border-color:transparent;color:var(--accent-ink)"><span class="pip" style="background:var(--accent)"></span><span class="grow">${pushState() === 'needs-install' ? 'Bildirim almak için Tayfa\'yı ana ekrana ekle' : 'Yeni planlardan haberdar olmak için bildirimleri aç'}</span><span>Aç</span></button>`;
   }
+  o += turnStrip();
+  o += otdCard();
+  h += `<div class="over">${o}</div>`;
   if (myPending.length) {
     h += `<p class="section-title">Onayını bekleyen önerilerin</p>`;
     h += myPending.map((e) => `<section class="card"><div class="ev-head">${dateBox(e)}<div style="flex:1;min-width:0"><h2>${esc(e.title)}</h2>
@@ -814,11 +855,6 @@ function homeView() {
       <span class="pill" style="background:var(--warn-bg);color:var(--warn-ink)">Onay bekliyor</span></div>
       <button class="btn small danger" data-withdraw="${e.id}" style="align-self:flex-start">Öneriyi geri çek</button></section>`).join('');
   }
-  if (!upcoming.length) {
-    h += `<div class="card"><div class="empty">${svg('cal')}<b style="color:var(--ink)">Henüz plan yok</b><span>${isAdmin() ? 'İlk planı sen aç.' : 'Bir plan öner, yönetici onaylayınca herkese duyurulsun.'}</span></div></div>`;
-  } else h += heroCard(upcoming[0]);
-  h += turnStrip();
-  h += otdCard();
   if (upcoming.length > 1) {
     h += `<p class="section-title">Diğer planlar</p>`;
     h += upcoming.slice(1).map(eventCard).join('');
@@ -987,7 +1023,7 @@ function openSheet(html, onMount) {
   onMount?.($sheet.querySelector('.sheet'));
 }
 function closeSheet() { $sheet.innerHTML = ''; }
-const sheetHead = (t) => `<div class="sheet-head"><h2 style="font-size:20px">${t}</h2><button class="icon-btn" data-close aria-label="Kapat" style="width:38px;height:38px;border:none;background:#EFE9E4">${svg('x')}</button></div>`;
+const sheetHead = (t) => `<div class="sheet-head"><h2 style="font-size:20px">${t}</h2><button class="icon-btn x-btn" data-close aria-label="Kapat">${svg('x')}</button></div>`;
 
 function showEventSheet(pre = {}) {
   const d = new Date(Date.now() + 24 * 3600 * 1000); d.setMinutes(0, 0, 0); d.setHours(20);
@@ -1092,11 +1128,18 @@ function showProfileSheet() {
       <div class="small">${esc(S.session.user.email)} · ${isAdmin() ? 'Yönetici' : 'Üye'} · ${esc(S.ctx.group_name)}</div></div></div>
     <a class="btn block" href="aydinlatma.html" target="_blank" style="text-decoration:none">${svg('shield')}Aydınlatma metni</a>
     <button class="btn block" id="p-notify">${svg('bell')}Bildirim ayarı</button>
+    <label class="sw-row" for="p-dark"><span class="grow"><b>Koyu tema</b><span>Gece gözü yormayan koyu renkler</span></span>
+      <span class="switch"><input type="checkbox" id="p-dark" ${getTheme() === 'koyu' ? 'checked' : ''}><i></i></span></label>
     <button class="btn block danger" id="p-out">Çıkış yap</button>
     <p class="diag" id="p-diag">Son bildirim bilgisi okunuyor…</p>
     <p class="small" style="text-align:center">Tayfa · Sürüm ${APP_VERSION}</p>`, () => {
     diagLine().then((t) => { const el = document.getElementById('p-diag'); if (el) el.innerHTML = t; });
     document.getElementById('p-notify').onclick = () => { closeSheet(); showNotifySheet(); };
+    document.getElementById('p-dark').onchange = (e) => {
+      const t = e.target.checked ? 'koyu' : 'acik';
+      try { localStorage.setItem(THEME_KEY, t); } catch (_) { /* */ }
+      applyTheme(t);
+    };
     document.getElementById('p-out').onclick = () => { closeSheet(); logout(); };
   });
 }

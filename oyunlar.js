@@ -51,16 +51,16 @@ function drawTab() {
     const sc = pi >= 0 ? `${st.score[pi]} – ${st.score[1 - pi]}` : `${st.score[0]} – ${st.score[1]}`;
     const myTurn = g.turn === me();
     const label = g.players.includes(me()) ? `Tavla · ${esc(nameOf(opp))} ile` : `Tavla · ${esc(nameOf(g.players[0]))} – ${esc(nameOf(g.players[1]))}`;
-    return `<button class="game-row" data-game="${g.id}">${avatar(nameOf(opp), opp, 'lg')}
+    return `<button class="game-row" data-game="${g.id}"><span class="game-ic tavla">${svg('tavla')}</span>
       <div class="grow"><div class="name">${label}</div><div class="small">Skor ${sc} · ${g.match_to} sayılık maç</div></div>
       ${g.players.includes(me()) ? `<span class="pill" style="${myTurn ? 'background:var(--accent);color:#fff' : ''}">${myTurn ? 'Sıra sende' : 'Sıra onda'}</span>` : `<span class="pill">İzle</span>`}</button>`;
   };
   box.innerHTML = `
     ${mineActive.length ? `<section class="card"><h2>Maçların</h2>${mineActive.map(row).join('')}</section>` : ''}
     <section class="card"><h2>Yeni oyun</h2>
-      <div class="list-row"><div class="grow"><div class="name">Tavla</div><div class="small">2 kişi · sırayla · zarlar sunucuda atılır</div></div>
+      <div class="list-row"><span class="game-ic tavla">${svg('tavla')}</span><div class="grow"><div class="name">Tavla</div><div class="small">2 kişi · sırayla · zarlar sunucuda atılır</div></div>
         <button class="btn small primary" id="new-tavla">Masa aç</button></div>
-      ${['Batak', 'King', 'Okey'].map((n) => `<div class="list-row"><div class="grow"><div class="name">${n}</div><div class="small">4 kişi</div></div><span class="pill" style="background:#EFE9E4;color:var(--sub)">Yakında</span></div>`).join('')}
+      ${[['Batak', 'batak', 'spade'], ['King', 'king', 'crown'], ['Okey', 'okey', 'tile']].map(([n, c, i]) => `<div class="list-row"><span class="game-ic ${c}">${svg(i)}</span><div class="grow"><div class="name">${n}</div><div class="small">4 kişi</div></div><span class="pill" style="background:var(--line);color:var(--sub)">Yakında</span></div>`).join('')}
     </section>
     ${othersActive.length ? `<section class="card"><h2>Gruptaki diğer maçlar</h2>${othersActive.map(row).join('')}</section>` : ''}
     <section class="card"><h2>Bu ayın tavla tablosu</h2>

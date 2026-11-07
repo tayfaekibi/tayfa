@@ -1,7 +1,7 @@
 // Sohbet: uçtan uca şifreli grup sohbeti, sesli mesajlar, tepkiler, yanıtlar
 import {
   sb, S, esc, svg, avatar, toast, errText, rpc, fmt, openSheet, closeSheet, sheetHead,
-  isAdmin, me, nameOf, activeMembers, header, bindHeader, route, updateTabDots, loadData,
+  isAdmin, me, nameOf, activeMembers, header, bindHeader, route, updateTabDots, loadData, render,
 } from './app.js';
 import * as E from './e2e.js';
 
@@ -37,7 +37,8 @@ export async function loadUnread() {
 // ------------------------------------------------------------------ ekran
 export function tabView() {
   return `<div class="chat-wrap">
-    <div class="chat-head">${header('Sohbet', `<span class="e2e-line">${svg('lock')}Uçtan uca şifreli</span>`)}</div>
+    <div class="chat-head">${header('Sohbet', `<span class="e2e-line">${svg('lock')}Uçtan uca şifreli</span>${myMember()?.chat_muted ? `<span class="mute-pill">${svg('muted')}Sessizde</span>` : ''}`,
+      { extra: `<button class="icon-btn ${myMember()?.chat_muted ? 'on' : ''}" id="chat-mute" aria-label="${myMember()?.chat_muted ? 'Sohbet sessizde, ayarı aç' : 'Sohbeti sessize al'}">${svg(myMember()?.chat_muted ? 'muted' : 'sound')}</button>` })}</div>
     <button class="pin-bar" id="pin-bar" aria-label="Sabitlenmiş mesaja git"></button>
     <div class="chat-list" id="chat-list"><p class="sub" style="text-align:center;padding:40px 0">Mesajlar yükleniyor…</p></div>
     <div class="chat-typing" id="chat-typing"></div>
@@ -54,9 +55,42 @@ export function tabView() {
   </div>`;
 }
 
+const myMember = () => S.members.find((m) => m.user_id === me());
+
+// Sohbeti sessize al: aç/kapa + sessizdeyken bahsedilince bildir
+function muteSheet() {
+  const m = myMember() || {};
+  const draw = () => {
+    const muted = !!m.chat_muted, men = m.chat_mute_mentions !== false;
+    return `${sheetHead('Sohbeti sessize al')}
+      <label class="sw-row" for="mu-on"><span class="grow"><b>Sessize al</b><span>Genel sohbetten bildirim gelmez, Sohbet sekmesinde sayı görünür</span></span>
+        <span class="switch"><input type="checkbox" id="mu-on" ${muted ? 'checked' : ''}><i></i></span></label>
+      <label class="sw-row ${muted ? '' : 'off'}" for="mu-men"><span class="grow"><b>Benden bahsedilince yine bildir</b><span>@adın yazılınca ya da mesajına yanıt verilince</span></span>
+        <span class="switch"><input type="checkbox" id="mu-men" ${men ? 'checked' : ''} ${muted ? '' : 'disabled'}><i></i></span></label>
+      <p class="small">Bu ayar sadece genel sohbet içindir. Plan, onay ve oyun bildirimleri gelmeye devam eder.</p>`;
+  };
+  const save = async () => {
+    try { await rpc('set_chat_mute', { p_muted: !!m.chat_muted, p_mentions: m.chat_mute_mentions !== false }); }
+    catch (e) { toast(errText(e)); }
+  };
+  const bind = () => {
+    document.getElementById('mu-on').onchange = async (e) => {
+      m.chat_muted = e.target.checked; await save();
+      document.querySelector('.sheet').innerHTML = '<div class="grab"></div>' + draw(); bind();
+      const b = document.getElementById('chat-mute');
+      if (b) { b.classList.toggle('on', m.chat_muted); b.innerHTML = svg(m.chat_muted ? 'muted' : 'sound'); }
+      toast(m.chat_muted ? 'Sohbet sessize alındı' : 'Sohbet bildirimleri açık');
+    };
+    document.getElementById('mu-men').onchange = async (e) => { m.chat_mute_mentions = e.target.checked; await save(); };
+    document.querySelectorAll('[data-close]').forEach((b) => b.onclick = () => { closeSheet(); if (S.view === 'main' && S.tab === 'chat') render(); });
+  };
+  openSheet(draw(), bind);
+}
+
 export async function mount() {
   C.mounted = true;
   bindHeader();
+  document.getElementById('chat-mute')?.addEventListener('click', muteSheet);
   bindComposer();
   fitViewport();
   try {
@@ -275,13 +309,14 @@ function bindList(l) {
       if (x0 == null) return;
       dx = p.clientX - x0;
       if (!swiping && Math.abs(p.clientY - y0) > 14) { x0 = null; return; }
+      if (Math.abs(dx) > 6 && e.cancelable) e.preventDefault(); // sadece mesaj kaysın, ekran yerinde kalsın
       if (dx > 10) {
         if (!swiping) { swiping = true; el.classList.add('swiping'); ic = document.createElement('span'); ic.className = 'swipe-ic'; ic.innerHTML = svg('reply'); el.prepend(ic); }
         const d = Math.min(70, dx);
         el.style.transform = `translateX(${d}px)`;
         ic.style.opacity = String(Math.min(1, d / 55));
       }
-    }, { passive: true });
+    }, { passive: false });
     const end = () => {
       cancel();
       if (swiping) {

@@ -481,3 +481,114 @@ h1 { font-weight: 800; letter-spacing: -0.6px; }
 .edge-back { position: fixed; left: 0; top: 50%; width: 40px; height: 40px; margin-top: -20px; border-radius: 50%; background: var(--navy); color: #FFF;
   display: flex; align-items: center; justify-content: center; z-index: 95; pointer-events: none; opacity: 0; transform: translateX(-44px); }
 .edge-back svg { width: 20px; height: 20px; }
+
+/* ================= Sürüm 3.1 ================= */
+html, body { overflow-x: hidden; }
+/* ana sayfa üst: lacivert başlık */
+.top { background: var(--navy); color: #FFF; margin: calc(-1 * (var(--safe-top) + 20px)) -20px 0; padding: calc(var(--safe-top) + 16px) 20px 80px;
+  border-radius: 0 0 34px 34px; display: flex; flex-direction: column; gap: 14px; }
+.top-bar { display: flex; align-items: center; gap: 10px; }
+.top-bar .logo { width: 36px; height: 36px; flex-shrink: 0; }
+.top-bar b { flex: 1; font-size: 22px; font-weight: 800; letter-spacing: -0.6px; }
+.top .icon-btn { background: rgba(255,255,255,.1); color: #FFF; box-shadow: none; }
+.top .icon-btn .n { background: var(--coral); color: #1A1410; border-color: var(--navy); }
+.top .icon-btn .dot { border-color: var(--navy); background: var(--coral); }
+.top .me-btn { background: var(--coral); color: #1A1410; box-shadow: 0 0 0 2px rgba(255,255,255,.35); }
+.top-date { font-size: 14px; color: #A9BCCD; }
+.top-hi { font-size: 21px; font-weight: 800; letter-spacing: -0.4px; line-height: 1.2; margin-top: 2px; }
+.top-people { display: flex; align-items: center; gap: 10px; font-size: 13px; color: #C5D2DE; }
+.top-people .av { border-color: var(--navy); }
+.over { margin-top: -64px; display: flex; flex-direction: column; gap: 14px; position: relative; }
+.next { background: var(--card); border-radius: 26px; padding: 16px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 14px 34px rgba(19,50,75,.16); }
+.next-k { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.next-k > span:first-child { font-size: 11px; font-weight: 800; letter-spacing: 1px; color: var(--accent); white-space: nowrap; }
+.next .wx { background: #EEF3F7; color: var(--navy); }
+.next .datebox { background: var(--navy); color: #FFF; } .next .datebox span { color: #FFB59F; }
+.next h2 { font-size: 19px; font-weight: 800; }
+.next .row2 .btn:not(.primary):not(.ok-on):not(.no-on) { background: #F1ECE6; border: none; }
+.next .links { display: flex; justify-content: space-between; align-items: center; }
+.next .links .btn.small { border: none; background: none; color: var(--sub); padding: 0 4px; box-shadow: none; }
+
+/* sohbet: kaydırırken sadece mesaj kayar */
+.chat-list { overflow-x: hidden; overscroll-behavior: contain; }
+.msg { touch-action: pan-y; }
+.mute-pill { display: inline-flex; align-items: center; gap: 4px; color: var(--sub); font-weight: 600; font-size: 12px; margin-left: 6px; }
+.mute-pill svg { width: 13px; height: 13px; }
+.icon-btn.on { background: var(--accent-soft); color: var(--accent); }
+
+/* aç/kapa düğmesi */
+.sw-row { display: flex; align-items: center; gap: 12px; background: var(--card); border-radius: 16px; padding: 12px 14px; box-shadow: var(--shadow); }
+.sw-row .grow { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.sw-row .grow b { font-size: 15px; } .sw-row .grow span { font-size: 13px; color: var(--sub); }
+.sw-row.off { opacity: .5; }
+.switch { position: relative; width: 52px; height: 32px; flex-shrink: 0; }
+.switch input { position: absolute; inset: 0; opacity: 0; margin: 0; width: 100%; height: 100%; z-index: 1; }
+.switch i { position: absolute; inset: 0; border-radius: 16px; background: #D4CCC3; transition: background .2s; }
+.switch i::after { content: ''; position: absolute; top: 3px; left: 3px; width: 26px; height: 26px; border-radius: 50%; background: #FFF; box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: transform .2s; }
+.switch input:checked + i { background: var(--accent); }
+.switch input:checked + i::after { transform: translateX(20px); }
+.switch input:focus-visible + i { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* oyun simgeleri */
+.game-ic { width: 48px; height: 48px; border-radius: 15px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.game-ic svg { width: 26px; height: 26px; }
+.game-ic.tavla { background: #24493A; color: #E9D8B6; }
+.game-ic.batak { background: var(--navy); color: #FFF; }
+.game-ic.king { background: #FFF1CF; color: #8A6200; }
+.game-ic.okey { background: var(--accent-soft); color: var(--accent); }
+.game-row .game-ic svg { width: 26px; height: 26px; color: inherit; }
+
+/* ================= koyu tema ================= */
+:root[data-theme="dark"] {
+  --accent: #E0603F; --accent-dark: #C9452A; --accent-soft: #3A2620; --accent-ink: #FFB59F;
+  --ink: #E6ECF1; --sub: #9DAAB6; --bg: #0F1A24; --card: #182734; --line: #263848; --field: #2F4355;
+  --ok: #7BC97A; --ok-soft: #1E3324; --warn-bg: #3A3016; --warn-line: #5A4A1C; --warn-ink: #F2D58A; --danger: #FF8A6E;
+  --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.25);
+  color-scheme: dark;
+}
+:root[data-theme="dark"] .btn, :root[data-theme="dark"] .icon-btn, :root[data-theme="dark"] .input, :root[data-theme="dark"] .bubble,
+:root[data-theme="dark"] .strip, :root[data-theme="dark"] .inbox, :root[data-theme="dark"] .pin-bar, :root[data-theme="dark"] .reply-bar,
+:root[data-theme="dark"] .g-score, :root[data-theme="dark"] .g-status, :root[data-theme="dark"] .album-card, :root[data-theme="dark"] .known,
+:root[data-theme="dark"] .choice, :root[data-theme="dark"] .mention-bar button, :root[data-theme="dark"] .emoji-row, :root[data-theme="dark"] .rx span,
+:root[data-theme="dark"] .sys-card, :root[data-theme="dark"] .kvkk, :root[data-theme="dark"] .gc-bar, :root[data-theme="dark"] .composer textarea,
+:root[data-theme="dark"] .composer-row textarea, :root[data-theme="dark"] .composer, :root[data-theme="dark"] .seg button.on,
+:root[data-theme="dark"] .seg3 button.on, :root[data-theme="dark"] .swipe-ic, :root[data-theme="dark"] .sw-row {
+  background-color: var(--card); color: var(--ink); border-color: var(--line); }
+:root[data-theme="dark"] .composer { background: var(--bg); }
+:root[data-theme="dark"] .btn.primary { background: var(--accent); color: #FFF; }
+:root[data-theme="dark"] .btn.danger { color: var(--danger); }
+:root[data-theme="dark"] .btn.ok-on { background: var(--ok-soft); color: var(--ok); }
+:root[data-theme="dark"] .msg.mine .bubble { background: var(--accent); color: #FFF; }
+:root[data-theme="dark"] .seg, :root[data-theme="dark"] .seg3, :root[data-theme="dark"] .day-sep span, :root[data-theme="dark"] .round-btn,
+:root[data-theme="dark"] .progress, :root[data-theme="dark"] .grab { background: #223444; color: var(--ink); }
+:root[data-theme="dark"] .round-btn.send { background: var(--accent); color: #FFF; }
+:root[data-theme="dark"] .tabbar { background: rgba(24,39,52,.96); box-shadow: 0 12px 32px rgba(0,0,0,.45); }
+:root[data-theme="dark"] .tab { color: #8896A3; }
+:root[data-theme="dark"] .tab-n, :root[data-theme="dark"] .tab-dot { border-color: var(--card); }
+:root[data-theme="dark"] .ib { border-top-color: var(--line); } :root[data-theme="dark"] .ib.new { background: #22303C; }
+:root[data-theme="dark"] .hero, :root[data-theme="dark"] .top, :root[data-theme="dark"] .g-end, :root[data-theme="dark"] .inapp { background: #1B3A55; }
+:root[data-theme="dark"] .top .icon-btn .n, :root[data-theme="dark"] .top .icon-btn .dot { border-color: #1B3A55; }
+:root[data-theme="dark"] .top-people .av { border-color: #1B3A55; }
+:root[data-theme="dark"] .next .wx, :root[data-theme="dark"] .card .wx { background: #223444; color: var(--ink); }
+:root[data-theme="dark"] .next .datebox { background: #1B3A55; }
+:root[data-theme="dark"] .next .row2 .btn:not(.primary):not(.ok-on):not(.no-on) { background: #223444; }
+:root[data-theme="dark"] .next .links .btn.small { background: none; }
+:root[data-theme="dark"] .datebox { background: var(--accent-soft); color: var(--accent-ink); }
+:root[data-theme="dark"] .brand b { color: var(--ink); }
+:root[data-theme="dark"] .me-btn { background: #2B4F70; }
+:root[data-theme="dark"] .quote { background: rgba(255,255,255,.07); }
+:root[data-theme="dark"] .sheet { background: var(--bg); }
+:root[data-theme="dark"] .sheet-backdrop { background: rgba(0,0,0,.6); }
+:root[data-theme="dark"] .banner { background: var(--warn-bg); border-color: var(--warn-line); color: var(--warn-ink); }
+:root[data-theme="dark"] .info, :root[data-theme="dark"] .code-box { background: var(--accent-soft); color: var(--accent-ink); }
+:root[data-theme="dark"] .diag { background: #182734; }
+:root[data-theme="dark"] .switch i { background: #3A4D5E; }
+:root[data-theme="dark"] .ic.chat { background: #1F3346; color: #9CC3EA; } :root[data-theme="dark"] .ic.plan { background: #3A3016; color: #F2D58A; }
+:root[data-theme="dark"] .ic.photo { background: #1E3324; color: #8FD08C; } :root[data-theme="dark"] .ic.other { background: #223444; color: var(--sub); }
+:root[data-theme="dark"] .game-ic.king { background: #3A3016; color: #F2D58A; }
+:root[data-theme="dark"] .g-turn { background: var(--ok-soft); color: var(--ok); } :root[data-theme="dark"] .g-turn.wait { background: #223444; color: var(--sub); }
+:root[data-theme="dark"] #toast { background: #E6ECF1; color: #0F1A24; }
+:root[data-theme="dark"] .msg-text a { color: #FFB59F; }
+:root[data-theme="dark"] .map-kind { background: rgba(24,39,52,.95); color: var(--ink); }
+.icon-btn.x-btn { width: 38px; height: 38px; border: none; box-shadow: none; background: #EFE9E4; }
+:root[data-theme="dark"] .icon-btn.x-btn { background: #223444; }
