@@ -1,0 +1,3 @@
+# Tayfa
+
+Arkadaş grubu uygulaması.
