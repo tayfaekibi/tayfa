@@ -29,7 +29,7 @@ jobs:
           version: latest
       - name: Gizli anahtarı Supabase'e kaydet
         if: steps.chk.outputs.ok == 'true' && env.VAPID_PRIVATE_KEY != ''
-        run: supabase secrets set VAPID_PRIVATE_KEY="$VAPID_PRIVATE_KEY" --project-ref "$PROJECT_REF"
+        run: supabase secrets set VAPID_PRIVATE_KEY="$VAPID_PRIVATE_KEY" --project-ref "$PROJECT_REF" --yes
       - name: Bildirim fonksiyonunu yükle
         if: steps.chk.outputs.ok == 'true'
-        run: supabase functions deploy push --project-ref "$PROJECT_REF" --no-verify-jwt
+        run: supabase functions deploy push --project-ref "$PROJECT_REF" --no-verify-jwt --yes
