@@ -7,3 +7,6 @@ verify_jwt = false
 verify_jwt = false
 
 # Bildirim fonksiyonu GitHub Actions ile yüklenir.
+
+[functions.king]
+verify_jwt = false

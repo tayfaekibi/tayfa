@@ -67,7 +67,7 @@ Deno.serve(async (req) => {
     const since = new Date(Date.now() - 45 * 1000).toISOString();
     const { data: pres } = await db.from("presence").select("user_id, game_id").gt("seen_at", since).in("user_id", userIds);
     const viewing = new Map((pres ?? []).filter((r) => r.game_id).map((r) => [r.user_id, r.game_id]));
-    const gameOf = (tag: string | null) => tag?.match(/^(?:tavla|oyun-sohbet)-(.+)$/)?.[1] ?? null;
+    const gameOf = (tag: string | null) => tag?.match(/^(?:tavla|king|oyun-sohbet)-(.+)$/)?.[1] ?? null;
 
     let sent = 0;
     const gone: string[] = [];

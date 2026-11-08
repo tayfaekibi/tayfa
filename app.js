@@ -58,6 +58,7 @@ const ICON = {
   trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
   chev: '<path d="M9 6l6 6-6 6"/>',
   trophy: '<path d="M8 4h8v5a4 4 0 0 1-8 0z"/><path d="M8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4M12 13v4M8 20h8"/>',
+  check: '<path d="M5 12l5 5L20 7"/>',
   pinIt: '<path d="M9 4h6l-1 6 3 3H7l3-3z"/><path d="M12 13v7"/>',
   again: '<path d="M4 12a8 8 0 0 1 14-5.3L20 9"/><path d="M20 4v5h-5"/><path d="M20 12a8 8 0 0 1-14 5.3L4 15"/><path d="M4 20v-5h5"/>',
   dice: '<rect x="4" y="4" width="16" height="16" rx="4"/><circle cx="9" cy="9" r="1.2" fill="currentColor"/><circle cx="15" cy="15" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/>',
@@ -195,6 +196,7 @@ function updateBell() {
 }
 const kindOf = (i) => {
   const t = i.tag || '', u = i.url || '';
+  if (/^king-/.test(t)) return ['game', 'crown'];
   if (/^(tavla|oyun-sohbet)-/.test(t) || u.includes('#oyun')) return ['game', 'dice'];
   if (/^(bahis|sohbet)-/.test(t) || u.includes('#sohbet')) return ['chat', 'chat'];
   if (/^(plan|onay|yorum)-/.test(t) || u.includes('#plan') || u.includes('#yonetim')) return ['plan', 'cal'];
@@ -789,7 +791,7 @@ function topBlock() {
   const act = activeMembers();
   const others = act.filter((m) => m.user_id !== me());
   const adminDot = pendingMembers().length + pendingEvents().length > 0 ? '<span class="dot"></span>' : '';
-  return `<section class="top">
+  return `<section class="home-top">
     <header class="top-bar">${SAIL}<b>Tayfa</b>
       <button class="icon-btn" id="h-bell" aria-label="Bildirimler">${svg('bell')}</button>
       ${isAdmin() ? `<button class="icon-btn" id="h-admin" aria-label="Yönetim">${svg('shield')}${adminDot}</button>` : ''}
@@ -806,6 +808,11 @@ function turnStrip() {
   const list = S.myTurnList || [];
   if (!list.length) return '';
   const g = list[0];
+  if (g.state?.kind === 'king') {
+    return `<button class="strip" data-go-game="${g.id}"><span class="ic">${svg('crown')}</span>
+    <span class="grow"><b>Sıra sende${list.length > 1 ? ` · ${list.length} oyun` : ''}</b><span>King · ${g.state.phase === 'choose' ? `${g.state.hand}. eli sen seçeceksin` : `${g.state.hand}. el`}</span></span>
+    <span class="go">Oyna</span></button>`;
+  }
   const opp = g.players.find((p) => p !== me());
   const pi = g.players.indexOf(me());
   const sc = g.state?.score ? `${g.state.score[pi]}–${g.state.score[1 - pi]}` : '';

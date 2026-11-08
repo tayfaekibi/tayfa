@@ -5,6 +5,7 @@ import {
 } from './app.js';
 import * as T from './supabase/functions/_shared/tavla.js';
 import * as Sohbet from './sohbet.js';
+import * as KU from './kingui.js';
 
 const G = { games: [], game: null, channel: null, done: [], sel: null, busy: false };
 
@@ -41,10 +42,18 @@ function drawTab() {
   const othersActive = G.games.filter((g) => g.status === 'active' && !g.players.includes(me()));
   const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
   const wins = {};
-  G.games.filter((g) => g.status === 'finished' && g.winner && new Date(g.finished_at) >= monthStart)
+  G.games.filter((g) => g.kind === 'tavla' && g.status === 'finished' && g.winner && new Date(g.finished_at) >= monthStart)
     .forEach((g) => { wins[g.winner] = (wins[g.winner] || 0) + 1; });
   const board = Object.entries(wins).sort((a, b) => b[1] - a[1]);
   const row = (g) => {
+    if (g.kind === 'king') {
+      const st = g.state; const pi = g.players.indexOf(me());
+      const myTurn = g.turn === me();
+      const names = g.players.filter((p) => p !== me()).map((p) => esc(nameOf(p).split(' ')[0])).join(', ');
+      return `<button class="game-row" data-game="${g.id}"><span class="game-ic king">${svg('crown')}</span>
+        <div class="grow"><div class="name">King · ${names}</div><div class="small">${st.hand}. el / 20${pi >= 0 ? ` · puanın ${st.score[pi]}` : ''}</div></div>
+        ${pi >= 0 ? `<span class="pill" style="${myTurn ? 'background:var(--accent);color:#fff' : ''}">${myTurn ? 'Sıra sende' : 'Bekle'}</span>` : `<span class="pill">İzle</span>`}</button>`;
+    }
     const opp = g.players.find((p) => p !== me()) || g.players[1];
     const st = g.state;
     const pi = g.players.indexOf(me());
@@ -60,7 +69,9 @@ function drawTab() {
     <section class="card"><h2>Yeni oyun</h2>
       <div class="list-row"><span class="game-ic tavla">${svg('tavla')}</span><div class="grow"><div class="name">Tavla</div><div class="small">2 kişi · sırayla · zarlar sunucuda atılır</div></div>
         <button class="btn small primary" id="new-tavla">Masa aç</button></div>
-      ${[['Batak', 'batak', 'spade'], ['King', 'king', 'crown'], ['Okey', 'okey', 'tile']].map(([n, c, i]) => `<div class="list-row"><span class="game-ic ${c}">${svg(i)}</span><div class="grow"><div class="name">${n}</div><div class="small">4 kişi</div></div><span class="pill" style="background:var(--line);color:var(--sub)">Yakında</span></div>`).join('')}
+      <div class="list-row"><span class="game-ic king">${svg('crown')}</span><div class="grow"><div class="name">King</div><div class="small">4 kişi · 20 el · kartlar sunucuda dağıtılır</div></div>
+        <button class="btn small primary" id="new-king">Masa aç</button></div>
+      ${[['Batak', 'batak', 'spade'], ['Okey', 'okey', 'tile']].map(([n, c, i]) => `<div class="list-row"><span class="game-ic ${c}">${svg(i)}</span><div class="grow"><div class="name">${n}</div><div class="small">4 kişi</div></div><span class="pill" style="background:var(--line);color:var(--sub)">Yakında</span></div>`).join('')}
     </section>
     ${othersActive.length ? `<section class="card"><h2>Gruptaki diğer maçlar</h2>${othersActive.map(row).join('')}</section>` : ''}
     <section class="card"><h2>Bu ayın tavla tablosu</h2>
@@ -69,6 +80,7 @@ function drawTab() {
     </section>`;
   box.querySelectorAll('[data-game]').forEach((b) => b.onclick = () => openGame(b.dataset.game));
   document.getElementById('new-tavla').onclick = pickOpponent;
+  document.getElementById('new-king').onclick = pickKing;
 }
 
 function pickOpponent() {
@@ -85,6 +97,32 @@ function pickOpponent() {
       } catch (e) { toast(errText(e)); }
     });
   });
+}
+
+// King için 3 kişi seç
+function pickKing() {
+  const list = activeMembers().filter((m) => m.user_id !== me());
+  const picked = new Set();
+  const draw = () => `${sheetHead('King masası aç')}
+    <p class="sub">Seninle oynayacak 3 kişiyi seç.</p>
+    ${list.length >= 3 ? list.map((m) => `<button class="game-row ${picked.has(m.user_id) ? 'picked-row' : ''}" data-kp="${m.user_id}">${avatar(m.display_name, m.user_id, 'lg')}<div class="grow name">${esc(m.display_name)}</div>
+      <span class="check ${picked.has(m.user_id) ? 'on' : ''}">${picked.has(m.user_id) ? svg('check') : ''}</span></button>`).join('')
+      : '<p class="sub">King için grupta en az 4 kişi olmalı.</p>'}
+    <button class="btn primary block" id="kp-go" ${picked.size === 3 ? '' : 'disabled'}>${picked.size === 3 ? 'Masayı aç' : `${3 - picked.size} kişi daha seç`}</button>`;
+  const bind = () => {
+    document.querySelectorAll('[data-kp]').forEach((b) => b.onclick = () => {
+      const u = b.dataset.kp;
+      if (picked.has(u)) picked.delete(u); else if (picked.size < 3) picked.add(u);
+      document.querySelector('.sheet').innerHTML = '<div class="grab"></div>' + draw(); bind();
+    });
+    document.getElementById('kp-go')?.addEventListener('click', async (e) => {
+      e.target.disabled = true;
+      try { const id = await rpc('create_king', { p_others: [...picked] }); closeSheet(); openGame(id); }
+      catch (err) { toast(errText(err)); e.target.disabled = false; }
+    });
+    document.querySelectorAll('[data-close]').forEach((b) => b.onclick = closeSheet);
+  };
+  openSheet(draw(), bind);
 }
 
 function openGame(id) {
@@ -113,7 +151,17 @@ export async function renderGame() {
   if (G.channel) sb.removeChannel(G.channel);
   G.channel = sb.channel('oyun-' + S.gameId)
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `game_id=eq.${S.gameId}` }, ({ new: m }) => Sohbet.gameChatIncoming(m))
-    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'games', filter: `id=eq.${S.gameId}` }, ({ new: g }) => {
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'king_hands', filter: `game_id=eq.${S.gameId}` }, async () => {
+      if (G.game?.kind !== 'king') return;
+      await KU.loadHand(G.game); drawGame();
+    })
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'games', filter: `id=eq.${S.gameId}` }, async ({ new: g }) => {
+      if (g.kind === 'king') {
+        const newHand = G.game?.state?.hand !== g.state?.hand;
+        G.game = g;
+        if (newHand) await KU.loadHand(g);
+        drawGame(); return;
+      }
       const turnChanged = G.game?.turn !== g.turn || JSON.stringify(G.game?.state?.dice) !== JSON.stringify(g.state?.dice);
       G.game = g;
       if (turnChanged) { G.done = []; G.sel = null; }
@@ -155,6 +203,7 @@ async function reloadGame() {
   const { data, error } = await sb.from('games').select('*').eq('id', S.gameId).maybeSingle();
   if (error || !data) { document.getElementById('g-body').innerHTML = '<p class="sub">Oyun bulunamadı.</p>'; return; }
   G.game = data; G.done = []; G.sel = null;
+  if (data.kind === 'king') await KU.loadHand(data);
   drawGame();
 }
 
@@ -162,7 +211,7 @@ async function call(action, extra = {}) {
   if (G.busy) return;
   G.busy = true; drawGame();
   try {
-    const { data, error } = await sb.functions.invoke('tavla', { body: { action, game_id: G.game.id, ...extra } });
+    const { data, error } = await sb.functions.invoke(G.game.kind === 'king' ? 'king' : 'tavla', { body: { action, game_id: G.game.id, ...extra } });
     if (error) {
       let msg = error.message;
       try { const j = await error.context?.json?.(); if (j?.hata) msg = j.hata; } catch (_) { /* */ }
@@ -172,11 +221,28 @@ async function call(action, extra = {}) {
     G.busy = false;
     await reloadGame();
     loadMyTurns().then(updateTabDots).catch(() => {});
-  } catch (e) { G.busy = false; toast(errText(e)); drawGame(); }
+    return true;
+  } catch (e) { G.busy = false; toast(errText(e)); drawGame(); return false; }
 }
 
 function gameMenu() {
   const g = G.game; if (!g) return;
+  if (g.kind === 'king') {
+    const canClose = g.status === 'active' && (g.created_by === me() || S.ctx.role === 'admin');
+    openSheet(`${sheetHead('King')}
+      <button class="btn block" id="k-m-score">Puan tablosu</button>
+      <button class="btn block" id="k-m-rules">Kurallar</button>
+      ${canClose ? '<button class="btn block danger" id="k-m-close">Masayı kapat</button>' : ''}
+      <button class="btn block" data-close>Kapat</button>`, () => {
+      document.getElementById('k-m-score').onclick = () => KU.scoreSheet(g);
+      document.getElementById('k-m-rules').onclick = KU.rulesSheet;
+      document.getElementById('k-m-close')?.addEventListener('click', () => {
+        if (!confirm('Masa herkes için kapanacak ve oyun bitecek. Emin misin?')) return;
+        closeSheet(); call('close');
+      });
+    });
+    return;
+  }
   const playing = g.players.includes(me()) && g.status === 'active';
   openSheet(`${sheetHead('Tavla')}
     <p class="sub" style="line-height:1.5">Zarlar sunucuda atılır, hamleler kurallara göre kontrol edilir. Mars 2 sayı. Eli kaybeden yeni ele başlar.</p>
@@ -196,7 +262,7 @@ const BOTTOM = [11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
 function drawChatBar() {
   const box = document.getElementById('g-chatbar'); if (!box || !G.game) return;
   const { last, unread } = Sohbet.gameChatSummary();
-  box.innerHTML = `<button class="gc-bar" id="g-chat">${svg('chat')}<span class="grow">${last ? esc(last) : 'Rakibinle sohbet et'}</span>${unread ? `<b class="gc-n">${unread}</b>` : ''}</button>`;
+  box.innerHTML = `<button class="gc-bar" id="g-chat">${svg('chat')}<span class="grow">${last ? esc(last) : G.game.kind === 'king' ? 'Masayla sohbet et' : 'Rakibinle sohbet et'}</span>${unread ? `<b class="gc-n">${unread}</b>` : ''}</button>`;
   document.getElementById('g-chat').onclick = () => Sohbet.openGameChat(G.game);
 }
 
@@ -225,6 +291,13 @@ function sumTargets(legal, done, sel) {
 function drawGame() {
   const box = document.getElementById('g-body'); const g = G.game;
   if (!box || !g) return;
+  if (g.kind === 'king') {
+    const tt = document.getElementById('g-title');
+    if (tt) tt.innerHTML = `<h1>King</h1><p class="small">${g.state.hand}. el / 20${g.state.contract ? '' : g.status === 'active' ? ' · seçim bekleniyor' : ''}</p>`;
+    KU.draw(g, box, call);
+    drawChatBar();
+    return;
+  }
   const st = g.state;
   const p = g.players.indexOf(me());            // -1: izleyici
   const view = p === -1 ? 0 : p;               // izleyici beyaz tarafından bakar

@@ -60,7 +60,7 @@ jobs:
           done
       - name: Sunucu fonksiyonlarını yükle
         if: steps.chk.outputs.ok == 'true'
-        run: supabase functions deploy push tavla --project-ref "$PROJECT_REF" --no-verify-jwt --yes
+        run: supabase functions deploy push tavla king --project-ref "$PROJECT_REF" --no-verify-jwt --yes
       - name: Fonksiyonu dene
         if: steps.chk.outputs.ok == 'true'
         run: |
