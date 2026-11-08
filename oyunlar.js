@@ -322,7 +322,8 @@ async function call(action, extra = {}) {
     }
     if (data?.hata) throw new Error(data.hata);
     G.busy = false;
-    await reloadGame();
+    // Masayı arkadan tazele, oyuncuyu bekletme
+    reloadGame().catch(() => {});
     loadMyTurns().then(updateTabDots).catch(() => {});
     return true;
   } catch (e) {

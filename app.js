@@ -5,8 +5,19 @@ import * as Sohbet from './sohbet.js';
 import * as Oyunlar from './oyunlar.js';
 import { ensureDevice } from './e2e.js';
 
+// İstekler asılı kalmasın: iPhone ağ değiştirince (Wi-Fi ↔ mobil) bazen cevap hiç gelmiyor, uygulama donuyordu.
+// Her istek en fazla 15 sn bekler (dosya yüklemeleri 120 sn).
+function fetchWithTimeout(input, init = {}) {
+  const url = typeof input === 'string' ? input : input?.url || '';
+  const ms = /\/storage\/v1\/object\/(?!sign)/.test(url) && (init.method || 'GET') !== 'GET' ? 120000 : 15000;
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), ms);
+  if (init.signal) { if (init.signal.aborted) ctl.abort(); else init.signal.addEventListener('abort', () => ctl.abort(), { once: true }); }
+  return fetch(input, { ...init, signal: ctl.signal }).finally(() => clearTimeout(t));
+}
 export const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
+  global: { fetch: fetchWithTimeout },
 });
 
 // ------------------------------------------------------------------ tema (açık / koyu)

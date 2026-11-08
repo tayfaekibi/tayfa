@@ -740,3 +740,24 @@ body.recording .round-btn.armed, body.recording .round-btn.armed * { pointer-eve
 .sheet.gc-sheet { display: flex; flex-direction: column; overflow: hidden; height: min(80vh, 640px); }
 .sheet.gc-sheet .gc-list { flex: 1 1 auto; max-height: none; min-height: 60px; overflow-y: auto; }
 body.kb-open .sheet.gc-sheet { height: calc(var(--vvh, 100vh) - 16px); }
+
+/* King komik efektler */
+.sheet.gc-sheet > * { flex-shrink: 0; }
+.sheet.gc-sheet > .gc-list { flex: 1 1 auto; }
+.k-fx { position: fixed; z-index: 140; transform: translate(-50%, -100%); pointer-events: none; animation: fxIn .35s cubic-bezier(.2,1.4,.4,1); transition: opacity .3s, transform .3s; }
+.k-fx.out { opacity: 0; transform: translate(-50%, -130%); }
+@keyframes fxIn { from { transform: translate(-50%, -60%) scale(.3); opacity: 0; } to { transform: translate(-50%, -100%) scale(1); opacity: 1; } }
+.k-fx.crown { font-size: 34px; margin-top: 8px; }
+.k-fx.gag { font-size: 40px; margin-top: 30px; }
+.k-fx.react { font-size: 26px; margin-left: 22px; margin-top: 6px; }
+.k-fx.brag, .k-fx.shame { margin-top: -6px; background: #FFF; color: #16222E; font: 800 15px/1.2 'Plus Jakarta Sans', system-ui, sans-serif; padding: 8px 12px; border-radius: 16px; box-shadow: 0 8px 20px rgba(0,0,0,.3); white-space: nowrap; }
+.k-fx.shame { background: #FF7A9C; color: #FFF; }
+.k-conf { position: fixed; z-index: 139; width: 8px; height: 12px; border-radius: 2px; pointer-events: none; }
+.k-seat .av { position: relative; }
+.k-mark { position: absolute; font-style: normal; pointer-events: none; z-index: 2; line-height: 1; }
+.k-mark.m1 { left: 18px; top: -2px; font-size: 18px; transform: rotate(-20deg); }
+.k-mark.m2 { left: 52px; top: 10px; font-size: 16px; transform: rotate(18deg); }
+.k-mark.m3 { left: 22px; top: 26px; font-size: 15px; transform: rotate(-8deg); }
+.k-mark.m4 { left: 50px; top: 30px; font-size: 14px; transform: rotate(25deg); }
+.k-mark.face { left: 50%; top: 4px; transform: translateX(-50%); font-size: 30px; }
+.k-mark.hat { left: 50%; top: -24px; transform: translateX(-50%); font-size: 30px; }

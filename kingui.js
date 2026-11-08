@@ -44,6 +44,7 @@ export function draw(game, box, call) {
     const s0 = game.state; const counts = [...s0.counts]; counts[KU.pending.seat] = Math.max(0, counts[KU.pending.seat] - 1);
     game = { ...game, state: { ...s0, trick: [...s0.trick, { seat: KU.pending.seat, card: KU.pending.card }], counts, turn: (KU.pending.seat + 1) % 4 } };
   }
+  if (KU.pending && (game.state.trick.some((t) => t.card === KU.pending.card) || (game.state.lastTrick?.cards || []).some((t) => t.card === KU.pending.card))) KU.pending = null;
   const st = game.state;
   const mine = Math.max(0, game.players.indexOf(me()));
   const playing = game.players.includes(me());
@@ -61,7 +62,8 @@ export function draw(game, box, call) {
     const turn = game.status === 'active' && st.turn === i;
     const isCh = st.phase === 'choose' && st.chooser === i;
     const tb = st.tricksBy?.[i] || 0, hp = st.handPts?.[i] || 0;
-    return `<div class="k-seat ${posOf(i, mine)} ${turn ? 'turn' : ''}" data-vu="${u}" data-seat="${i}">${avatar(nameOf(u), u)}<i class="k-vb" aria-hidden="true">${svg('headset')}</i>
+    const marks = st.phase === 'play' ? penaltyMarks(st.contract?.type, hp) : '';
+    return `<div class="k-seat ${posOf(i, mine)} ${turn ? 'turn' : ''}" data-vu="${u}" data-seat="${i}">${avatar(nameOf(u), u)}<i class="k-vb" aria-hidden="true">${svg('headset')}</i>${marks}
       <b>${esc(nameOf(u).split(' ')[0])}</b><span>Toplam ${st.score[i]}${isCh ? ' · seçiyor' : ''}</span>
       ${st.phase === 'play' ? `<em class="k-hp ${hp < 0 ? 'neg' : hp > 0 ? 'pos' : ''}">${tb} el${hp ? ` · ${hp > 0 ? '+' : ''}${hp}` : ''}</em>` : ''}</div>`;
   };
@@ -130,9 +132,9 @@ export function draw(game, box, call) {
     draw(game, box, call);
     const ok = await call('play', { card: c });
     clearTimeout(guard);
-    KU.pending = null;
     KU.busy = false;
-    if (!ok) { KU.hand = prev; draw(game, box, call); }
+    if (!ok) { KU.pending = null; KU.hand = prev; draw(game, box, call); }
+    else setTimeout(() => { if (KU.pending?.card === c) KU.pending = null; }, 20000); // masa tazelenince kendiliğinden kalkar
   };
   box.querySelectorAll('[data-kc]').forEach((el) => el.onclick = () => {
     const c = el.dataset.kc;
@@ -151,6 +153,7 @@ export function draw(game, box, call) {
     await call('choose', { type: 'koz', trump: s });
   });
   box.querySelectorAll('#k-table').forEach((b) => b.onclick = () => scoreSheet(game));
+  trickFx(game, mine, playing);
   if (playing && game.status === 'active') {
     Voice.watch(game.id, game.players, drawVoice);
     Voice.setTreatHandler((p) => showTreat(game, p));
@@ -256,3 +259,85 @@ export function rulesSheet() {
 }
 
 export function resetSel() { KU.sel = null; KU.pickType = null; }
+
+// ================================================================== komik efektler
+// Ceza yiyenin üstünde el boyunca kalan işaretler (puandan çıkarılır, herkes aynı şeyi görür)
+function penaltyMarks(type, hp) {
+  if (!type || hp >= 0) return '';
+  const pos = ['m1', 'm2', 'm3', 'm4'];
+  if (type === 'kiz') { const n = Math.min(4, Math.round(-hp / 100)); return pos.slice(0, n).map((p) => `<i class="k-mark ${p}">💋</i>`).join(''); }
+  if (type === 'erkek') return '<i class="k-mark face">🥸</i>';
+  if (type === 'kupa') { const n = Math.min(3, Math.ceil(-hp / 90)); return pos.slice(0, n).map((p) => `<i class="k-mark ${p}">💔</i>`).join(''); }
+  if (type === 'rifki') return '<i class="k-mark hat">🤴</i>';
+  if (type === 'el') return '<i class="k-mark face">🫠</i>';
+  if (type === 'soniki') return '<i class="k-mark face">😵</i>';
+  return '';
+}
+const BRAG = ['Topla bakalım! 😎', 'Bu el benim! 😏', 'Ustaya saygı 🫡', 'Kolay oldu 😌', 'Sıradaki? 🤷'];
+const GRUMPY = ['😤', '🙄', '😒', '🤨'];
+const LAUGH = ['😂', '🤭', '😆', '🤣'];
+const pick = (a) => a[Math.floor(Math.random() * a.length)];
+function seatEl(uid) {
+  return uid === me() ? document.querySelector('.k-me') : document.querySelector(`.k-seat[data-vu="${uid}"]`);
+}
+function avatarEl(uid) { const s = seatEl(uid); return s?.querySelector('.av') || s; }
+function floatAt(el, html, cls, ms = 2600) {
+  if (!el) return;
+  const r = el.getBoundingClientRect();
+  const d = document.createElement('div');
+  d.className = 'k-fx ' + cls; d.innerHTML = html;
+  d.style.left = `${r.left + r.width / 2}px`; d.style.top = `${r.top}px`;
+  document.body.appendChild(d);
+  setTimeout(() => { d.classList.add('out'); setTimeout(() => d.remove(), 300); }, ms);
+}
+function confetti(el) {
+  if (!el) return;
+  const r = el.getBoundingClientRect();
+  const cols = ['#FF7A59', '#FFD27A', '#7BE08A', '#9CC3EA', '#FF7A9C'];
+  for (let i = 0; i < 18; i++) {
+    const c = document.createElement('i');
+    c.className = 'k-conf'; c.style.background = cols[i % cols.length];
+    c.style.left = `${r.left + r.width / 2}px`; c.style.top = `${r.top + r.height / 2}px`;
+    document.body.appendChild(c);
+    const a = Math.random() * Math.PI * 2, dist = 50 + Math.random() * 70;
+    c.animate([{ transform: 'translate(0,0) rotate(0)', opacity: 1 },
+      { transform: `translate(${Math.cos(a) * dist}px, ${Math.sin(a) * dist - 30}px) rotate(${Math.random() * 540}deg)`, opacity: 0 }],
+    { duration: 1100 + Math.random() * 500, easing: 'cubic-bezier(.2,.7,.4,1)' }).finished.then(() => c.remove()).catch(() => c.remove());
+  }
+}
+function trickFx(game, mine, playing) {
+  const st = game.state;
+  const key = `${game.id}|${st.history?.length || 0}|${st.tricksDone}|${JSON.stringify(st.lastTrick?.cards || null)}`;
+  if (KU.fxGame !== game.id) { KU.fxGame = game.id; KU.fxKey = key; return; } // ekran ilk açılınca oynatma
+  if (KU.fxKey === key) return;
+  KU.fxKey = key;
+  const lt = st.lastTrick; if (!lt?.cards?.length) return;
+  // El yeni bittiyse sözleşme history'de, değilse şu anki
+  const handJustEnded = st.phase === 'choose' || (st.tricksDone === 0 && st.history?.length);
+  const type = handJustEnded ? st.history[st.history.length - 1]?.type : st.contract?.type;
+  const winner = game.players[lt.winner];
+  const cards = lt.cards.map((t) => t.card);
+  const wName = esc(nameOf(winner).split(' ')[0]);
+  const others = game.players.filter((u) => u !== winner);
+  setTimeout(() => {
+    if (type === 'koz') {
+      floatAt(avatarEl(winner), '👑', 'crown', 2600);
+      confetti(avatarEl(winner));
+      floatAt(seatEl(winner), esc(pick(BRAG)), 'brag', 2600);
+      others.forEach((u) => floatAt(avatarEl(u), pick(GRUMPY), 'react', 2200));
+      return;
+    }
+    let gag = null;
+    if (type === 'kiz') { const n = cards.filter((c) => K.rankOf(c) === 12).length; if (n) gag = ['💋', `${wName} kızı kaptı! −${100 * n}`]; }
+    else if (type === 'erkek') { const n = cards.filter((c) => [11, 13].includes(K.rankOf(c))).length; if (n) gag = ['🥸', `${wName} erkek aldı! −${60 * n}`]; }
+    else if (type === 'kupa') { const n = cards.filter((c) => K.suitOf(c) === 'H').length; if (n) gag = ['💔', `${wName} ${n} kupa yedi! −${30 * n}`]; }
+    else if (type === 'rifki') { if (cards.includes('H13')) gag = ['🤴', `${wName} rıfkıyı yedi! −320`]; }
+    else if (type === 'el') gag = ['🫠', `${wName} el aldı −50`];
+    else if (type === 'soniki' && (st.tricksDone >= 12 || handJustEnded)) gag = ['😵', `${wName} son eli aldı! −180`];
+    if (!gag) return;
+    floatAt(avatarEl(winner), gag[0], 'gag', 2600);
+    floatAt(seatEl(winner), esc(gag[1]), 'shame', 2800);
+    others.forEach((u) => floatAt(avatarEl(u), pick(LAUGH), 'react', 2200));
+    if (winner === me()) navigator.vibrate?.([30, 40, 30]);
+  }, 350);
+}
