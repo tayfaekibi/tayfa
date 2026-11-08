@@ -76,6 +76,8 @@ Deno.serve(async (req) => {
     for (const item of items) {
       for (const sub of subs ?? []) {
         if (!(item.user_ids as string[]).includes(sub.user_id)) continue;
+        // Masa sohbeti mesajları telefona bildirim olarak gelmez (oyuna girince sohbet tuşunda sayı görünür)
+        if (item.tag?.startsWith("oyun-sohbet-")) continue;
         const g = gameOf(item.tag);
         if (g && viewing.get(sub.user_id) === g) continue;
         // Oyun oynarken genel sohbet bildirimi gelmez (uygulamada sayı olarak görünür); @bahis ve yanıtlar gelir

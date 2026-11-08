@@ -145,7 +145,7 @@ async function drawMap() {
   try { ml = await loadMapLibre(); } catch (e) { box.innerHTML = `<div class="card"><p class="sub">${esc(e.message)}. İnternet bağlantını kontrol et.</p></div>`; return; }
   if (!document.getElementById('map')) return;
   if (map) { try { map.remove(); } catch (_) { /* */ } }
-  map = new ml.Map({ container: 'map', style: styleFor(mapKind()), center: TR_CENTER, zoom: 4.6, attributionControl: { compact: true } });
+  map = new ml.Map({ container: 'map', style: styleFor(mapKind()), center: TR_CENTER, zoom: 4.6, attributionControl: { compact: true } }); attribI(map);
   addKindToggle(box.querySelector('.map-wrap'), map);
   map.touchPitch?.disable?.(); map.dragRotate.disable(); map.touchZoomRotate.disableRotation();
   map.on('load', () => map.resize());
@@ -716,7 +716,7 @@ export async function pickLocation(album, onPick) {
     <button class="btn primary block" id="pick-ok" disabled>Bu konumu kullan</button>`, async () => {
     let ml; try { ml = await loadMapLibre(); } catch (e) { toast(errText(e)); return; }
     const center = album.lat != null ? [album.lng, album.lat] : TR_CENTER;
-    const m = new ml.Map({ container: 'pick-map', style: styleFor(mapKind()), center, zoom: album.lat != null ? 10 : 4.6, attributionControl: { compact: true } });
+    const m = new ml.Map({ container: 'pick-map', style: styleFor(mapKind()), center, zoom: album.lat != null ? 10 : 4.6, attributionControl: { compact: true } }); attribI(m);
     addKindToggle(document.getElementById('pick-map').parentElement, m);
     m.dragRotate.disable(); m.touchZoomRotate.disableRotation();
     m.on('load', () => m.resize()); setTimeout(() => m.resize(), 300);
@@ -762,4 +762,11 @@ export async function pickLocation(album, onPick) {
       catch (e) { toast(errText(e)); }
     };
   });
+}
+
+// Harita kaynağı yazısı başta kapalı: sadece "i" görünür, basınca açılır, haritaya dokununca kapanır
+function attribI(m) {
+  const shut = () => m.getContainer().querySelectorAll('.maplibregl-ctrl-attrib.maplibregl-compact-show').forEach((e) => { e.classList.remove('maplibregl-compact-show'); e.removeAttribute('open'); });
+  shut(); m.once('load', shut); m.once('idle', shut); setTimeout(shut, 1500);
+  m.on('click', shut); m.on('dragstart', shut);
 }

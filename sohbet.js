@@ -315,7 +315,7 @@ function bubble(m, isMyLast) {
   const rs = C.reactions.filter((r) => r.message_id === m.id);
   const groups = {};
   rs.forEach((r) => { groups[r.emoji] = (groups[r.emoji] || 0) + 1; });
-  const rx = Object.keys(groups).length ? `<div class="rx">${Object.entries(groups).map(([e, n]) => `<span>${e}${n > 1 ? ' ' + n : ''}</span>`).join('')}</div>` : '';
+  const rx = Object.keys(groups).length ? `<div class="rx">${Object.entries(groups).map(([e, n]) => `<span data-rx="${e}" class="${rs.some((r) => r.user_id === me() && r.emoji === e) ? 'on' : ''}">${e}${n > 1 ? ' ' + n : ''}</span>`).join('')}</div>` : '';
   let seen = '';
   if (mine && isMyLast) {
     const n = C.reads.filter((r) => r.user_id !== me() && new Date(r.last_read_at) >= new Date(m.created_at)).length;
@@ -372,6 +372,11 @@ function bindList(l) {
     el.addEventListener('contextmenu', (e) => { e.preventDefault(); msgMenu(el.dataset.msg); });
   });
   l.querySelectorAll('[data-voice]').forEach((el) => bindVoice(el));
+  l.querySelectorAll('[data-msg] [data-rx]').forEach((b) => b.onclick = (e) => {
+    e.stopPropagation(); const id = b.closest('[data-msg]').dataset.msg;
+    const myR = C.reactions.find((r) => r.message_id === id && r.user_id === me())?.emoji;
+    rpc('react', { p_message: id, p_emoji: myR === b.dataset.rx ? null : b.dataset.rx }).catch((er) => toast(errText(er)));
+  });
   l.querySelectorAll('[data-sys-rsvp]').forEach((b) => b.onclick = async () => {
     try { await rpc('set_rsvp', { p_event: b.dataset.sysRsvp, p_answer: 'yes' }); await loadData(); drawList(false); toast('Katılımın kaydedildi'); }
     catch (e) { toast(errText(e)); }
@@ -708,7 +713,7 @@ function bindVoice(el) {
 
 
 // ================================================================== oyun içi sohbet (sadece oyuncular görür)
-const GC = { gameId: null, players: [], list: [], seenAt: 0, onChange: null };
+const GC = { gameId: null, players: [], list: [], reactions: [], seenAt: 0, onChange: null, ch: null };
 const QUICK = ['Hadi oyna! ⏰', 'Güzel hamle 👏', 'Şansa bak 🎲', 'Olmaz böyle 😅', 'İyi oyundu 🤝'];
 
 export async function gameChatLoad(game, onChange) {
@@ -718,6 +723,7 @@ export async function gameChatLoad(game, onChange) {
   const { data } = await sb.from('messages').select('*').eq('game_id', game.id).order('created_at', { ascending: false }).limit(100);
   GC.list = (data || []).reverse();
   await Promise.all(GC.list.map(decrypt));
+  await loadGCReactions();
   try { GC.seenAt = +(localStorage.getItem('tayfa-oyun-okundu-' + game.id) || 0); } catch (_) { GC.seenAt = 0; }
 }
 
@@ -742,6 +748,38 @@ function markGCSeen() {
   GC.onChange?.();
 }
 
+async function loadGCReactions() {
+  const ids = GC.list.map((m) => m.id);
+  if (!ids.length) { GC.reactions = []; return; }
+  const { data } = await sb.from('message_reactions').select('*').in('message_id', ids);
+  GC.reactions = data || [];
+}
+function gcRx(id) {
+  const rs = GC.reactions.filter((r) => r.message_id === id); if (!rs.length) return '';
+  const g = {}; rs.forEach((r) => { g[r.emoji] = (g[r.emoji] || 0) + 1; });
+  return `<div class="rx">${Object.entries(g).map(([e, n]) => `<span data-rx="${e}" class="${rs.some((r) => r.user_id === me() && r.emoji === e) ? 'on' : ''}">${e}${n > 1 ? ' ' + n : ''}</span>`).join('')}</div>`;
+}
+async function gcReact(id, emoji) {
+  const myR = GC.reactions.find((r) => r.message_id === id && r.user_id === me())?.emoji;
+  const val = myR === emoji ? null : emoji;
+  GC.reactions = GC.reactions.filter((r) => !(r.message_id === id && r.user_id === me()));
+  if (val) GC.reactions.push({ message_id: id, user_id: me(), emoji: val });
+  drawGC(false);
+  try { await rpc('react', { p_message: id, p_emoji: val }); } catch (e) { toast(errText(e)); }
+}
+function gcPicker(el) {
+  document.querySelector('.rx-pick')?.remove();
+  const r = el.querySelector('.bubble').getBoundingClientRect();
+  const d = document.createElement('div'); d.className = 'rx-pick emoji-row';
+  d.innerHTML = EMOJIS.map((e) => `<button data-pe="${e}">${e}</button>`).join('');
+  document.body.appendChild(d);
+  const w = d.offsetWidth;
+  d.style.left = `${Math.max(8, Math.min(innerWidth - w - 8, r.left + r.width / 2 - w / 2))}px`;
+  d.style.top = `${Math.max(8, r.top - d.offsetHeight - 6)}px`;
+  navigator.vibrate?.(10);
+  d.querySelectorAll('[data-pe]').forEach((b) => b.onclick = () => { d.remove(); gcReact(el.dataset.gmsg, b.dataset.pe); });
+  setTimeout(() => document.addEventListener('pointerdown', function off(e) { if (!d.contains(e.target)) { d.remove(); document.removeEventListener('pointerdown', off, true); } }, true), 0);
+}
 function drawGC(scroll) {
   const l = document.getElementById('gc-list'); if (!l) return;
   l.innerHTML = GC.list.length ? GC.list.map((m) => {
@@ -750,10 +788,19 @@ function drawGC(scroll) {
       : m.kind === 'voice' ? `<div class="voice" data-voice="${m.id}"><button class="voice-play" aria-label="Oynat">${svg('play')}</button>
           <div class="voice-bar"><i></i></div><span class="voice-t">${fmtDur(m.duration_ms)}</span><button class="voice-speed" aria-label="Hız">1x</button></div>`
       : `<div class="msg-text">${linkify(esc(p.t || ''))}</div>`;
-    return `<div class="msg ${mine ? 'mine' : ''}">${mine ? '' : avatar(nameOf(m.sender), m.sender)}
-      <div class="msg-col"><div class="bubble">${body}</div></div></div>`;
+    return `<div class="msg ${mine ? 'mine' : ''}" data-gmsg="${m.id}">${mine ? '' : avatar(nameOf(m.sender), m.sender)}
+      <div class="msg-col"><div class="bubble">${body}</div>${gcRx(m.id)}</div></div>`;
   }).join('') : '<p class="small" style="text-align:center;padding:20px 0">Rakibine bir şey yaz ya da hazır mesajlardan birini gönder.</p>';
   l.querySelectorAll('[data-voice]').forEach((el) => bindVoice(el));
+  l.querySelectorAll('[data-gmsg]').forEach((el) => {
+    let t = null, y0 = 0;
+    const cancel = () => { if (t) { clearTimeout(t); t = null; } };
+    el.addEventListener('touchstart', (e) => { y0 = e.touches[0].clientY; cancel(); t = setTimeout(() => { t = null; gcPicker(el); }, 450); }, { passive: true });
+    el.addEventListener('touchmove', (e) => { if (Math.abs(e.touches[0].clientY - y0) > 8) cancel(); }, { passive: true });
+    el.addEventListener('touchend', cancel); el.addEventListener('touchcancel', cancel);
+    el.addEventListener('contextmenu', (e) => { e.preventDefault(); gcPicker(el); });
+    el.querySelectorAll('[data-rx]').forEach((b) => b.onclick = () => gcReact(el.dataset.gmsg, b.dataset.rx));
+  });
   if (scroll) l.scrollTop = l.scrollHeight;
 }
 
@@ -798,6 +845,12 @@ export function openGameChat(game) {
     </div>
     <div class="rec-bar hidden" id="rec-bar"><span class="rec-dot"></span><span id="rec-time">0:00</span><span class="grow small" style="color:var(--sub)">Bırakınca gider · iptal için yukarı kaydır</span></div>`, () => {
     document.querySelector('.sheet')?.classList.add('gc-sheet'); // yazma kutusu hep görünsün
+    // Başkalarının bıraktığı tepkiler canlı gelsin (pencere açıkken)
+    if (GC.ch) sb.removeChannel(GC.ch);
+    GC.ch = sb.channel('gc-rx-' + GC.gameId).on('postgres_changes', { event: '*', schema: 'public', table: 'message_reactions' }, async () => {
+      if (!document.getElementById('gc-list')) { const c = GC.ch; GC.ch = null; if (c) sb.removeChannel(c); return; }
+      await loadGCReactions(); drawGC(false);
+    }).subscribe();
     drawGC(true); markGCSeen();
     const inp = document.getElementById('gc-in'); const btn = document.getElementById('gc-btn');
     const setBtn = () => { const has = inp.value.trim().length > 0; btn.innerHTML = svg(has ? 'send' : 'mic'); btn.classList.toggle('send', has); };

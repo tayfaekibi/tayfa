@@ -153,7 +153,7 @@ export function draw(game, box, call) {
     await call('choose', { type: 'koz', trump: s });
   });
   box.querySelectorAll('#k-table').forEach((b) => b.onclick = () => scoreSheet(game));
-  trickFx(game, mine, playing);
+  trickFx(game);
   if (playing && game.status === 'active') {
     Voice.watch(game.id, game.players, drawVoice);
     Voice.setTreatHandler((p) => showTreat(game, p));
@@ -273,7 +273,7 @@ function penaltyMarks(type, hp) {
   if (type === 'soniki') return '<i class="k-mark face">😵</i>';
   return '';
 }
-const BRAG = ['Topla bakalım! 😎', 'Bu el benim! 😏', 'Ustaya saygı 🫡', 'Kolay oldu 😌', 'Sıradaki? 🤷'];
+const BRAG = ['Topla bakalım! 😎', 'Ustaya saygı 🫡', 'Kolay oldu 😌', 'Sıradaki? 🤷'];
 const GRUMPY = ['😤', '🙄', '😒', '🤨'];
 const LAUGH = ['😂', '🤭', '😆', '🤣'];
 const pick = (a) => a[Math.floor(Math.random() * a.length)];
@@ -305,39 +305,35 @@ function confetti(el) {
     { duration: 1100 + Math.random() * 500, easing: 'cubic-bezier(.2,.7,.4,1)' }).finished.then(() => c.remove()).catch(() => c.remove());
   }
 }
-function trickFx(game, mine, playing) {
+// Tur (13 kart) bitince bir kez: koz turunda en çok el alan şov yapar, cezada en çok yiyen rezil olur
+const SHAME = {
+  kiz: ['💋', 'kızları kaptı!'], erkek: ['🥸', 'erkekleri topladı!'], kupa: ['💔', 'kupaları yedi!'],
+  rifki: ['🤴', 'rıfkıyı yedi!'], el: ['🫠', 'en çok eli aldı!'], soniki: ['😵', 'son ikiyi yedi!'],
+};
+function trickFx(game) {
   const st = game.state;
-  const key = `${game.id}|${st.history?.length || 0}|${st.tricksDone}|${JSON.stringify(st.lastTrick?.cards || null)}`;
+  const key = `${game.id}|${st.history?.length || 0}`;
   if (KU.fxGame !== game.id) { KU.fxGame = game.id; KU.fxKey = key; return; } // ekran ilk açılınca oynatma
   if (KU.fxKey === key) return;
   KU.fxKey = key;
-  const lt = st.lastTrick; if (!lt?.cards?.length) return;
-  // El yeni bittiyse sözleşme history'de, değilse şu anki
-  const handJustEnded = st.phase === 'choose' || (st.tricksDone === 0 && st.history?.length);
-  const type = handJustEnded ? st.history[st.history.length - 1]?.type : st.contract?.type;
-  const winner = game.players[lt.winner];
-  const cards = lt.cards.map((t) => t.card);
-  const wName = esc(nameOf(winner).split(' ')[0]);
-  const others = game.players.filter((u) => u !== winner);
+  const h = st.history?.[st.history.length - 1]; if (!h?.pts) return;
+  const first = (u) => esc(nameOf(u).split(' ')[0]);
   setTimeout(() => {
-    if (type === 'koz') {
-      floatAt(avatarEl(winner), '👑', 'crown', 2600);
-      confetti(avatarEl(winner));
-      floatAt(seatEl(winner), esc(pick(BRAG)), 'brag', 2600);
-      others.forEach((u) => floatAt(avatarEl(u), pick(GRUMPY), 'react', 2200));
+    if (h.type === 'koz') {
+      const top = Math.max(...h.pts); if (top <= 0) return;
+      const win = game.players.filter((u, i) => h.pts[i] === top);
+      win.forEach((u) => { floatAt(avatarEl(u), '👑', 'crown', 3200); confetti(avatarEl(u)); });
+      floatAt(seatEl(win[0]), `${win.map(first).join(', ')} · ${top / 50} el! ${esc(pick(BRAG))}`, 'brag', 3400);
+      game.players.filter((u) => !win.includes(u)).forEach((u) => floatAt(avatarEl(u), pick(GRUMPY), 'react', 2800));
+      if (win.includes(me())) navigator.vibrate?.(40);
       return;
     }
-    let gag = null;
-    if (type === 'kiz') { const n = cards.filter((c) => K.rankOf(c) === 12).length; if (n) gag = ['💋', `${wName} kızı kaptı! −${100 * n}`]; }
-    else if (type === 'erkek') { const n = cards.filter((c) => [11, 13].includes(K.rankOf(c))).length; if (n) gag = ['🥸', `${wName} erkek aldı! −${60 * n}`]; }
-    else if (type === 'kupa') { const n = cards.filter((c) => K.suitOf(c) === 'H').length; if (n) gag = ['💔', `${wName} ${n} kupa yedi! −${30 * n}`]; }
-    else if (type === 'rifki') { if (cards.includes('H13')) gag = ['🤴', `${wName} rıfkıyı yedi! −320`]; }
-    else if (type === 'el') gag = ['🫠', `${wName} el aldı −50`];
-    else if (type === 'soniki' && (st.tricksDone >= 12 || handJustEnded)) gag = ['😵', `${wName} son eli aldı! −180`];
-    if (!gag) return;
-    floatAt(avatarEl(winner), gag[0], 'gag', 2600);
-    floatAt(seatEl(winner), esc(gag[1]), 'shame', 2800);
-    others.forEach((u) => floatAt(avatarEl(u), pick(LAUGH), 'react', 2200));
-    if (winner === me()) navigator.vibrate?.([30, 40, 30]);
-  }, 350);
+    const low = Math.min(...h.pts); if (low >= 0) return;
+    const gag = SHAME[h.type] || ['🫠', 'ceza yedi!'];
+    const lost = game.players.filter((u, i) => h.pts[i] === low);
+    lost.forEach((u) => floatAt(avatarEl(u), gag[0], 'gag', 3200));
+    floatAt(seatEl(lost[0]), `${lost.map(first).join(', ')} ${gag[1]} ${low}`, 'shame', 3400);
+    game.players.filter((u) => !lost.includes(u)).forEach((u) => floatAt(avatarEl(u), pick(LAUGH), 'react', 2800));
+    if (lost.includes(me())) navigator.vibrate?.([30, 40, 30]);
+  }, 450);
 }

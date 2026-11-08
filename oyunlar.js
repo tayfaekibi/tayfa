@@ -97,7 +97,7 @@ export async function mount() {
   bindHeader();
   try {
     const { data, error } = await sb.from('games').select('*').eq('group_id', S.ctx.group_id)
-      .order('updated_at', { ascending: false }).limit(60);
+      .order('updated_at', { ascending: false }).limit(150);
     if (error) throw error;
     G.games = data || [];
   } catch (e) { toast(errText(e)); }
@@ -112,10 +112,16 @@ function drawTab() {
   const mineActive = G.games.filter((g) => g.status === 'active' && g.players.includes(me()));
   const othersActive = G.games.filter((g) => g.status === 'active' && !g.players.includes(me()));
   const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
-  const wins = {};
-  G.games.filter((g) => g.kind === 'tavla' && g.status === 'finished' && g.winner && new Date(g.finished_at) >= monthStart)
-    .forEach((g) => { wins[g.winner] = (wins[g.winner] || 0) + 1; });
-  const board = Object.entries(wins).sort((a, b) => b[1] - a[1]);
+  const BEST = [['tavla', 'Tavla', 'tavla'], ['king', 'King', 'crown'], ['batak', 'Batak', 'spade'], ['okey', 'Okey', 'tile']];
+  const best = BEST.map(([k, n, ic]) => {
+    const wins = {};
+    G.games.filter((g) => g.kind === k && g.status === 'finished' && g.winner && new Date(g.finished_at) >= monthStart)
+      .forEach((g) => { wins[g.winner] = (wins[g.winner] || 0) + 1; });
+    return { k, n, ic, soon: k === 'batak' || k === 'okey', top: Object.entries(wins).sort((a, b) => b[1] - a[1]).slice(0, 3) };
+  });
+  const MED = ['🥇', '🥈', '🥉'];
+  const bestCol = (c) => `<div class="best-col ${c.soon ? 'later' : ''}"><div class="best-h"><span class="game-ic ${c.k}">${svg(c.ic)}</span>${c.n}</div>
+    ${c.soon ? '<p class="best-e">Yakında</p>' : c.top.length ? c.top.map(([u, n], i) => `<div class="best-r"><i>${MED[i]}</i>${avatar(nameOf(u), u)}<b>${esc(nameOf(u).split(' ')[0])}</b><span>${n}</span></div>`).join('') : '<p class="best-e">Henüz yok</p>'}</div>`;
   const row = (g) => {
     if (g.kind === 'king') {
       const st = g.state; const pi = g.players.indexOf(me());
@@ -137,6 +143,7 @@ function drawTab() {
   };
   box.innerHTML = `
     ${mineActive.length ? `<section class="card"><h2>Maçların</h2>${mineActive.map(row).join('')}</section>` : ''}
+    <section class="card"><h2>Bu ayın en iyileri 🏆</h2><div class="best">${best.map(bestCol).join('')}</div><p class="small" style="margin-top:6px">Bu ay kazanılan maç sayısı</p></section>
     <section class="card"><h2>Yeni oyun</h2>
       <div class="list-row"><span class="game-ic tavla">${svg('tavla')}</span><div class="grow"><div class="name">Tavla</div><div class="small">2 kişi · sırayla · zarlar sunucuda atılır</div></div>
         <button class="btn small primary" id="new-tavla">Masa aç</button></div>
@@ -145,9 +152,6 @@ function drawTab() {
       ${[['Batak', 'batak', 'spade'], ['Okey', 'okey', 'tile']].map(([n, c, i]) => `<div class="list-row"><span class="game-ic ${c}">${svg(i)}</span><div class="grow"><div class="name">${n}</div><div class="small">4 kişi</div></div><span class="pill" style="background:var(--line);color:var(--sub)">Yakında</span></div>`).join('')}
     </section>
     ${othersActive.length ? `<section class="card"><h2>Gruptaki diğer maçlar</h2>${othersActive.map(row).join('')}</section>` : ''}
-    <section class="card"><h2>Bu ayın tavla tablosu</h2>
-      ${board.length ? board.map(([u, n], i) => `<div class="list-row"><b style="width:22px">${i + 1}.</b>${avatar(nameOf(u), u)}<div class="grow name">${esc(nameOf(u))}</div><span class="small">${n} galibiyet</span></div>`).join('')
-        : '<p class="small">Bu ay henüz biten maç yok.</p>'}
     </section>`;
   box.querySelectorAll('[data-game]').forEach((b) => b.onclick = () => openGame(b.dataset.game));
   document.getElementById('new-tavla').onclick = pickOpponent;
