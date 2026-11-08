@@ -7,7 +7,78 @@ import * as T from './supabase/functions/_shared/tavla.js';
 import * as Sohbet from './sohbet.js';
 import * as KU from './kingui.js';
 
-const G = { games: [], game: null, channel: null, done: [], sel: null, busy: false };
+const G = { games: [], game: null, channel: null, done: [], sel: null, busy: false, view0: null, anim: null, animating: false, rollSeen: undefined };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Zar: beyaz, yuvarlak köşeli, noktalı
+const PIPS = { 1: [[50, 50]], 2: [[28, 28], [72, 72]], 3: [[28, 28], [50, 50], [72, 72]], 4: [[28, 28], [72, 28], [28, 72], [72, 72]],
+  5: [[28, 28], [72, 28], [50, 50], [28, 72], [72, 72]], 6: [[28, 26], [72, 26], [28, 50], [72, 50], [28, 74], [72, 74]] };
+const pipsSvg = (n) => `<svg viewBox="0 0 100 100" aria-hidden="true"><rect x="4" y="4" width="92" height="92" rx="20"/>${PIPS[n].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="9"/>`).join('')}</svg>`;
+const dieSvg = (n, cls = '') => `<span class="die3 ${cls}" data-n="${n}" role="img" aria-label="Zar ${n}">${pipsSvg(n)}</span>`;
+// Zar yuvarlanma: yarım saniye rastgele yüzler, sonra gelen sayı
+function rollDice(root) {
+  const ds = [...root.querySelectorAll('.die3.rolling')];
+  if (!ds.length) return;
+  let k = 0;
+  const t = setInterval(() => {
+    ds.forEach((d) => { d.innerHTML = pipsSvg(1 + Math.floor(Math.random() * 6)); });
+    if (++k >= 8) {
+      clearInterval(t);
+      ds.forEach((d) => { d.innerHTML = pipsSvg(+d.dataset.n); d.classList.remove('rolling'); d.classList.add('landed'); });
+      navigator.vibrate?.(25);
+    }
+  }, 70);
+}
+
+// Rakibin hamlesini taşları kaydırarak göster
+function anchorOf(el, top, after) {
+  const r = el.getBoundingClientRect();
+  const cks = el.querySelectorAll('.stack .ck');
+  const last = cks[cks.length - 1];
+  if (last) {
+    const lr = last.getBoundingClientRect();
+    const step = lr.height - 4;
+    return { x: lr.left + lr.width / 2, y: lr.top + lr.height / 2 + (after ? (top ? step : -step) : 0), size: lr.width };
+  }
+  return { x: r.left + r.width / 2, y: top ? r.top + 16 : r.bottom - 16, size: 26 };
+}
+async function flyChecker(m, by, meIdx) {
+  const board = document.querySelector('.board'); if (!board) return;
+  const mineSide = by === meIdx; // alttaki oyuncu mu
+  const barEl = mineSide ? board.querySelector('[data-pt="bar"]') : board.querySelector('.row .bar-col');
+  const offEl = mineSide ? board.querySelector('[data-pt="off"]') : board.querySelector('.row .off-col');
+  const src = m.from === 'bar' ? barEl : board.querySelector(`[data-pt="${m.from}"]`);
+  const dst = m.to === 'off' ? offEl : board.querySelector(`[data-pt="${m.to}"]`);
+  if (!src || !dst) return;
+  const isTop = (el) => el.classList.contains('top') || (el.classList.contains('bar-col') && !mineSide) || (el.classList.contains('off-col') && !mineSide);
+  const a = m.from === 'bar' ? (() => { const r = src.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, size: 26 }; })() : anchorOf(src, isTop(src), false);
+  const b = m.to === 'off' ? (() => { const r = dst.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, size: 26 }; })() : anchorOf(dst, isTop(dst), true);
+  const srcCks = src.querySelectorAll('.stack .ck, .bar-slot .ck');
+  const hide = srcCks[srcCks.length - 1]; if (hide) hide.style.visibility = 'hidden';
+  const ghost = document.createElement('span');
+  ghost.className = `ck c${by} ghost`;
+  Object.assign(ghost.style, { position: 'fixed', left: `${a.x - a.size / 2}px`, top: `${a.y - a.size / 2}px`, width: `${a.size}px`, height: `${a.size}px`, margin: 0, zIndex: 50 });
+  document.body.appendChild(ghost);
+  const anim = ghost.animate([{ transform: 'translate(0,0) scale(1)' }, { transform: `translate(${(b.x - a.x) / 2}px, ${(b.y - a.y) / 2}px) scale(1.25)`, offset: 0.5 },
+    { transform: `translate(${b.x - a.x}px, ${b.y - a.y}px) scale(1)` }], { duration: 380, easing: 'ease-in-out' });
+  await anim.finished.catch(() => {});
+  ghost.remove();
+}
+async function playOppAnim() {
+  const A = G.anim; G.anim = null; if (!A) return;
+  G.animating = true;
+  let cur = A.start;
+  try {
+    for (const m of A.moves) {
+      G.view0 = cur; drawGame();
+      await sleep(60);
+      await flyChecker(m, A.by, A.meIdx);
+      cur = T.applySequence(cur, A.by, [m]);
+    }
+    G.view0 = cur; drawGame(); await sleep(250);
+  } catch (e) { console.warn(e); }
+  G.view0 = null; G.animating = false; drawGame();
+}
 
 export async function loadMyTurns() {
   if (S.ctx.status !== 'active') return;
@@ -146,6 +217,7 @@ export async function renderGame() {
   document.getElementById('g-menu').onclick = gameMenu;
   drawChatCount();
   startPresence(S.gameId);
+  G.rollSeen = undefined; G.view0 = null; G.anim = null; G.animating = false;
   await reloadGame();
   if (G.game) Sohbet.gameChatLoad(G.game, () => drawChatBar()).then(drawChatBar).catch((e) => console.warn(e));
   if (G.channel) sb.removeChannel(G.channel);
@@ -163,9 +235,16 @@ export async function renderGame() {
         drawGame(); return;
       }
       const turnChanged = G.game?.turn !== g.turn || JSON.stringify(G.game?.state?.dice) !== JSON.stringify(g.state?.dice);
+      const prev = G.game?.state;
+      const last = g.state?.last;
+      const pIdx = g.players.indexOf(me());
+      const meIdx = pIdx === -1 ? 0 : pIdx;
+      if (prev && last && last.moves?.length && last.by !== pIdx && JSON.stringify(prev.last) !== JSON.stringify(last) && document.visibilityState === 'visible') {
+        G.anim = { start: { board: prev.board, bar: prev.bar, off: prev.off }, moves: last.moves, by: last.by, meIdx };
+      }
       G.game = g;
       if (turnChanged) { G.done = []; G.sel = null; }
-      drawGame();
+      if (G.anim && !G.animating) playOppAnim(); else drawGame();
     }).subscribe();
 }
 export function closeGame() {
@@ -303,13 +382,19 @@ function drawGame() {
   const view = p === -1 ? 0 : p;               // izleyici beyaz tarafından bakar
   const opp = g.players[view === 0 ? 1 : 0];
   const myTurn = g.status === 'active' && p >= 0 && st.turn === p;
-  const rolled = myTurn && st.dice?.length > 0;
+  const rolled = myTurn && st.dice?.length > 0 && !G.view0;
   const tt = document.getElementById('g-title');
   if (tt) tt.innerHTML = `<h1>${p >= 0 ? `${esc(nameOf(opp))} ile tavla` : `${esc(nameOf(g.players[0]))} – ${esc(nameOf(g.players[1]))}`}</h1><p class="small">${g.match_to} sayılık maç · ${st.hand || 1}. el</p>`;
 
-  let base = { board: st.board, bar: st.bar, off: st.off };
+  let base = G.view0 || { board: st.board, bar: st.bar, off: st.off };
+  // Yeni zar atıldıysa (kim atarsa atsın) yuvarlanma animasyonu
+  const rk = st.dice?.length ? 'd' + g.updated_at : (st.last?.pass ? 'p' + g.updated_at : null);
+  let animRoll = false;
+  if (G.rollSeen === undefined) G.rollSeen = rk;
+  else if (rk && rk !== G.rollSeen) { G.rollSeen = rk; animRoll = true; }
+  const oppRolling = g.status === 'active' && st.dice?.length > 0 && st.turn !== p;
   let legal = null, next = [];
-  if (rolled) {
+  if (rolled && !G.view0) {
     legal = T.legalSequences(base, p, st.dice);
     base = T.applySequence(base, p, G.done);
     next = T.nextSteps(legal, G.done);
@@ -354,7 +439,7 @@ function drawGame() {
   const barCan = myTurn && fromSet.has('bar');
   const offTgt = targetSet.has('off');
   const offSum = sumMap.has('off');
-  const die = (n, used) => `<span class="die ${used ? 'used' : ''}">${'⚀⚁⚂⚃⚄⚅'[n - 1]}</span>`;
+  const die = (n, used) => dieSvg(n, `${used ? 'used' : ''} ${animRoll ? 'rolling' : ''}`);
   const lastInfo = st.last ? (st.last.resign ? `${esc(nameOf(g.players[st.last.by]))} pes etti`
     : `${esc(nameOf(g.players[st.last.by]))} ${st.last.roll ? st.last.roll.join('-') + ' attı' : ''}${st.last.pass ? ', oynayamadı' : ''}`) : '';
 
@@ -370,8 +455,9 @@ function drawGame() {
       ${p >= 0 ? '<p style="font-size:12px">Rövanşa basınca rakibine davet gider</p>' : ''}</div>`;
   }
   else if (p === -1) status = `<div class="g-status">Sıra ${esc(nameOf(g.players[st.turn]))}'de</div>`;
+  else if (!myTurn && oppRolling) status = `<div class="g-status">${esc(nameOf(opp))} ${st.roll ? st.roll.join('-') + ' attı, ' : ''}oynuyor…</div>`;
   else if (!myTurn) status = `<div class="g-status">Sıra ${esc(nameOf(opp))}'de · hamlesini yapınca haber gelecek</div>`;
-  else if (!rolled) status = `<button class="btn primary block big" id="g-roll" ${G.busy ? 'disabled' : ''}>${svg('dice')}Zar at</button>`;
+  else if (!rolled) status = `<button class="btn primary block big" id="g-roll" ${G.busy || G.animating ? 'disabled' : ''}>${svg('dice')}Zar at</button>`;
   else status = `<div class="g-actions">
       <div class="dice">${(() => { const u = usedDice.slice(); return st.dice.map((d) => { const i = u.indexOf(d); if (i >= 0) { u.splice(i, 1); return die(d, true); } return die(d, false); }).join(''); })()}</div>
       <button class="btn small" id="g-undo" ${G.done.length ? '' : 'disabled'}>Geri al</button>
@@ -389,23 +475,25 @@ function drawGame() {
     <div class="board ${G.busy ? 'busy' : ''}">
       <div class="row">${half(TOP.slice(0, 6), true)}<div class="bar-col"><div class="bar-slot">${barStack(oppIdx)}</div></div>${half(TOP.slice(6), true)}
         <div class="off-col"><div class="off-slot">${base.off[oppIdx] ? `<span class="off-n c${oppIdx}">${base.off[oppIdx]}</span>` : ''}</div></div></div>
-      <div class="mid">${rolled ? '' : (st.last?.roll ? `<span class="mid-dice">${st.last.roll.map((d) => die(d)).join('')}</span>` : '')}</div>
+      <div class="mid">${rolled ? '' : oppRolling && st.roll ? `<span class="mid-dice big">${st.roll.map((d) => die(d)).join('')}</span>`
+        : (st.last?.roll ? `<span class="mid-dice ${st.last.pass && animRoll ? 'big' : ''}">${st.last.roll.map((d) => dieSvg(d, st.last.pass && animRoll ? 'rolling' : '')).join('')}</span>` : '')}</div>
       <div class="row">${half(BOTTOM.slice(0, 6), false)}<button class="bar-col ${barCan ? 'can' : ''} ${String(G.sel) === 'bar' ? 'selbar' : ''}" data-pt="bar" aria-label="Kırık taşlar"><div class="bar-slot">${barStack(meIdx)}</div></button>${half(BOTTOM.slice(6), false)}
         <button class="off-col ${offTgt ? 'tgt' : offSum ? 'tgt2' : ''}" data-pt="off" aria-label="Taş topla"><div class="off-slot">${base.off[meIdx] ? `<span class="off-n c${meIdx}">${base.off[meIdx]}</span>` : ''}</div></button></div>
     </div>
     ${rolled && G.sel != null ? '<div class="g-legend"><span><i class="g"></i>Yeşil: tek zar</span><span><i class="r"></i>Kırmızı: iki zar toplamı</span></div>' : ''}
-    ${lastInfo && !rolled && g.status === 'active' ? `<p class="small" style="text-align:center">${lastInfo}</p>` : ''}
+    ${lastInfo && !rolled && !oppRolling && g.status === 'active' ? `<p class="small" style="text-align:center">${lastInfo}</p>` : ''}
     ${status}
     ${myTurn && rolled && legal.maxLen === 0 ? '<p class="small" style="text-align:center">Oynanacak hamle yok.</p>' : ''}
     ${p >= 0 ? '<div id="g-chatbar"></div>' : ''}`;
   drawChatBar();
+  if (animRoll) rollDice(box);
 
   document.getElementById('g-roll')?.addEventListener('click', () => call('roll'));
   document.getElementById('g-undo')?.addEventListener('click', () => { G.done.pop(); G.sel = null; drawGame(); });
   document.getElementById('g-send')?.addEventListener('click', () => call('move', { moves: G.done }));
   document.getElementById('g-home')?.addEventListener('click', () => goMain('game'));
   document.getElementById('g-again')?.addEventListener('click', rematch);
-  if (!rolled) return;
+  if (!rolled || G.view0) return;
   box.querySelectorAll('[data-pt]').forEach((el) => el.onclick = () => {
     const k = el.dataset.pt;
     if (G.sel != null && targetSet.has(k)) {

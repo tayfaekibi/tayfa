@@ -663,3 +663,20 @@ html, body { overflow-x: hidden; }
 :root[data-theme="dark"] .k-suit:not(.red) { color: var(--ink); } :root[data-theme="dark"] .k-suit.red { color: #FF8A80; }
 :root[data-theme="dark"] .k-ct { background: #3A3016; color: #F2D58A; } :root[data-theme="dark"] .k-ct .grow span { color: #D9BE76; }
 :root[data-theme="dark"] .k-ct.koz { background: #1F3346; color: #CFE0F0; } :root[data-theme="dark"] .k-ct.koz .grow span { color: #9CB6CE; }
+
+/* zarlar */
+.die3 { display: inline-block; width: 44px; height: 44px; filter: drop-shadow(0 2px 3px rgba(0,0,0,.3)); }
+.die3 svg { width: 100%; height: 100%; display: block; }
+.die3 rect { fill: #FFFFFF; stroke: #D9CFC2; stroke-width: 3; }
+.die3 circle { fill: #1E1A17; }
+.die3.used { opacity: .3; }
+.die3.rolling { animation: tumble .56s ease-out; }
+.die3.landed { animation: land .22s ease-out; }
+@keyframes tumble { 0% { transform: translateY(-14px) rotate(-200deg) scale(.7); } 60% { transform: translateY(2px) rotate(20deg) scale(1.05); } 100% { transform: none; } }
+@keyframes land { 0% { transform: scale(1.12); } 100% { transform: none; } }
+.dice { gap: 8px; align-items: center; }
+.mid-dice { display: inline-flex; gap: 6px; }
+.mid-dice .die3 { width: 26px; height: 26px; }
+.mid-dice.big .die3 { width: 30px; height: 30px; }
+.board .mid { height: 38px; }
+.ck.ghost { pointer-events: none; border-radius: 50%; }
