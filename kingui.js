@@ -22,13 +22,30 @@ const ctName = (c) => c ? (c.type === 'koz' ? `Koz · ${K.SUIT_NAME[c.trump]} ${
 // Koltuklar: sen altta, senden sonra oynayan sağda, karşın üstte, solundaki solda (sıra sağdan döner)
 const posOf = (seat, mine) => ['bot', 'right', 'top', 'left'][(seat - mine + 4) % 4];
 
+// Elimdeki kart sayısı masadakiyle uyuşmuyorsa (yeni el dağıtılırken arada kalındıysa) eli yeniden al
+let healT = null, healTries = 0;
+function healHand(game, box, call) {
+  if (healT) return;
+  const wait = [300, 900, 2000, 4000][Math.min(healTries, 3)];
+  healT = setTimeout(async () => {
+    healT = null; healTries += 1;
+    if (KU.busy || !box.isConnected) return;
+    await loadHand(game);
+    draw(game, box, call);
+  }, wait);
+}
+
 export function draw(game, box, call) {
   const st = game.state;
   const mine = Math.max(0, game.players.indexOf(me()));
   const playing = game.players.includes(me());
+  if (playing && game.status === 'active' && !KU.busy) {
+    if (st.counts[mine] !== KU.hand.length) healHand(game, box, call); else healTries = 0;
+  }
   const myTurn = playing && game.status === 'active' && st.turn === mine;
   if (KU.gameId !== game.id) KU.sel = null;
-  const legal = myTurn && st.phase === 'play' ? K.legalCards(st, KU.hand) : [];
+  const synced = !playing || st.counts[mine] === KU.hand.length;
+  const legal = myTurn && st.phase === 'play' && synced ? K.legalCards(st, KU.hand) : [];
   if (KU.sel && !legal.includes(KU.sel)) KU.sel = null;
 
   const seatBox = (i) => {
@@ -95,9 +112,11 @@ export function draw(game, box, call) {
   const doPlay = async (c) => {
     if (KU.busy) return;
     KU.busy = true; KU.sel = null;
+    const guard = setTimeout(() => { if (KU.busy) { KU.busy = false; loadHand(game).then(() => draw(game, box, call)); } }, 12000);
     const prev = KU.hand; KU.hand = KU.hand.filter((x) => x !== c); // hemen elden çıkar
     draw(game, box, call);
     const ok = await call('play', { card: c });
+    clearTimeout(guard);
     KU.busy = false;
     if (!ok) { KU.hand = prev; draw(game, box, call); }
   };

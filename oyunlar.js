@@ -219,6 +219,7 @@ export async function renderGame() {
   startPresence(S.gameId);
   G.rollSeen = undefined; G.view0 = null; G.anim = null; G.animating = false;
   await reloadGame();
+  startPoll();
   if (G.game) Sohbet.gameChatLoad(G.game, () => drawChatBar()).then(drawChatBar).catch((e) => console.warn(e));
   if (G.channel) sb.removeChannel(G.channel);
   G.channel = sb.channel('oyun-' + S.gameId)
@@ -247,7 +248,25 @@ export async function renderGame() {
       if (G.anim && !G.animating) playOppAnim(); else drawGame();
     }).subscribe();
 }
+// Canlı bağlantı koparsa (iPhone arka plandan dönünce sık olur) oyunu düzenli olarak sunucudan tazele
+let pollT = null;
+async function pollGame() {
+  if (S.view !== 'game' || !G.game || document.visibilityState !== 'visible' || G.busy || G.animating) return;
+  const { data } = await sb.from('games').select('*').eq('id', G.game.id).maybeSingle();
+  if (!data || data.updated_at === G.game.updated_at) return;
+  const newHand = G.game.state?.hand !== data.state?.hand;
+  const turnChanged = G.game.turn !== data.turn;
+  G.game = data;
+  if (turnChanged) { G.done = []; G.sel = null; }
+  if (data.kind === 'king') await KU.loadHand(data); else if (newHand) { /* */ }
+  drawGame();
+}
+function startPoll() { stopPoll(); pollT = setInterval(pollGame, 6000); }
+function stopPoll() { if (pollT) { clearInterval(pollT); pollT = null; } }
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.view === 'game') setTimeout(pollGame, 300); });
+
 export function closeGame() {
+  stopPoll();
   if (G.channel) { sb.removeChannel(G.channel); G.channel = null; }
   stopPresence();
 }
