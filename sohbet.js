@@ -547,38 +547,55 @@ async function sendText() {
 }
 
 // ------------------------------------------------------------------ sesli mesaj
+let recEndedAt = 0;
+// Kayıt bittikten hemen sonra gelen sahte dokunmaları yut
+document.addEventListener('click', (e) => {
+  if (Date.now() - recEndedAt < 600 && !e.target.closest?.('.voice-play')) { e.preventDefault(); e.stopPropagation(); }
+}, true);
 function bindRecorder(btn, canRecord, onDone = sendVoice) {
   let rec = null, chunks = [], t0 = 0, timer = null, y0 = 0, cancelled = false, stream = null, pressed = false;
   const bar = () => document.getElementById('rec-bar');
+  const endUi = () => {
+    bar()?.classList.add('hidden');
+    btn.classList.remove('rec', 'armed');
+    recEndedAt = Date.now();
+    setTimeout(() => document.body.classList.remove('recording'), 450); // parmağı kaldırınca altta kalana dokunulmuş sayılmasın
+  };
   const stop = (send) => {
-    if (!rec) return;
+    if (!rec) { endUi(); return; }
     cancelled = !send;
     clearInterval(timer);
     try { rec.stop(); } catch (_) { /* */ }
-    bar()?.classList.add('hidden');
-    btn.classList.remove('rec');
+    endUi();
   };
+  // iPhone: uzun basışta metin seçme / büyüteç / menü çıkmasın
+  btn.addEventListener('touchstart', (e) => { if (canRecord()) e.preventDefault(); }, { passive: false });
+  btn.addEventListener('contextmenu', (e) => e.preventDefault());
   btn.addEventListener('pointerdown', async (e) => {
     if (!canRecord()) return;
     e.preventDefault();
     pressed = true;
+    btn.classList.add('armed');
+    try { btn.setPointerCapture(e.pointerId); } catch (_) { /* */ }
+    document.body.classList.add('recording');
     if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) { toast('Bu cihazda ses kaydı desteklenmiyor'); return; }
     try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
-    catch (_) { pressed = false; toast('Mikrofon izni verilmedi'); return; }
-    if (!pressed) { stream.getTracks().forEach((t) => t.stop()); toast('Sesli mesaj için basılı tut'); return; }
-    const mime = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'].find((x) => MediaRecorder.isTypeSupported?.(x)) || '';
+    catch (_) { pressed = false; endUi(); toast('Mikrofon izni verilmedi'); return; }
+    if (!pressed) { stream.getTracks().forEach((t) => t.stop()); endUi(); toast('Sesli mesaj için basılı tut'); return; }
+    // Önce iPhone'un da çalabildiği MP4 (AAC)
+    const mime = ['audio/mp4;codecs=mp4a.40.2', 'audio/mp4', 'audio/aac', 'audio/webm;codecs=opus', 'audio/webm'].find((x) => MediaRecorder.isTypeSupported?.(x)) || '';
     rec = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 32000 } : undefined);
     chunks = []; cancelled = false; t0 = Date.now(); y0 = e.clientY;
     rec.ondataavailable = (ev) => { if (ev.data.size) chunks.push(ev.data); };
     rec.onstop = () => {
       stream.getTracks().forEach((t) => t.stop());
       const dur = Date.now() - t0;
-      const type = rec.mimeType || mime || 'audio/mp4';
+      const type = (rec.mimeType || mime || 'audio/mp4').split(';')[0];
       rec = null;
       if (cancelled || dur < 700) { if (!cancelled) toast('Kaydetmek için basılı tut'); return; }
       onDone(new Blob(chunks, { type }), Math.min(dur, MAX_VOICE_MS));
     };
-    rec.start(250);
+    rec.start(); // tek parça kayıt (parçalı kayıt iPhone'da çalınamayabiliyor)
     btn.classList.add('rec');
     bar()?.classList.remove('hidden');
     timer = setInterval(() => {
@@ -631,7 +648,11 @@ function bindVoice(el) {
       if (playing.audio.paused) { playing.audio.play(); playBtn.innerHTML = svg('pause'); } else { playing.audio.pause(); playBtn.innerHTML = svg('play'); }
       return;
     }
-    if (playing) { playing.audio.pause(); playing = null; drawList(false); }
+    if (playing) { playing.audio.pause(); playing = null; }
+    // iPhone: oynatıcıyı dokunma anında oluştur ve "aç", ses sonra yüklenince çalsın
+    const audio = new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=');
+    audio.preload = 'auto';
+    try { audio.play().catch(() => {}); } catch (_) { /* */ }
     try {
       let url = voiceCache.get(id);
       if (!url) {
@@ -641,17 +662,24 @@ function bindVoice(el) {
         const { data, error } = await sb.storage.from('chat').download(m.audio_path);
         if (error) throw error;
         const bytes = await E.decBytes(key, m.audio_iv, new Uint8Array(await data.arrayBuffer()));
-        url = URL.createObjectURL(new Blob([bytes], { type: meta.mime || 'audio/mp4' }));
+        const mt = String(meta?.mime || 'audio/mp4').split(';')[0];
+        url = URL.createObjectURL(new Blob([bytes], { type: mt === 'audio/aac' ? 'audio/mp4' : mt }));
         voiceCache.set(id, url);
       }
-      const audio = new Audio(url);
+      audio.pause();
+      audio.src = url;
       audio.playbackRate = parseFloat(speedBtn.textContent);
       playing = { id, audio };
       audio.ontimeupdate = () => { if (audio.duration && isFinite(audio.duration)) bar.style.width = `${(audio.currentTime / audio.duration) * 100}%`; };
       audio.onended = () => { playBtn.innerHTML = svg('play'); bar.style.width = '0%'; playing = null; };
       await audio.play();
       playBtn.innerHTML = svg('pause');
-    } catch (err) { playBtn.innerHTML = svg('play'); toast(errText(err)); }
+    } catch (err) {
+      playBtn.innerHTML = svg('play');
+      const msg = String(err?.message || err);
+      toast(/not supported|NotSupported/i.test(msg) || err?.name === 'NotSupportedError'
+        ? 'Bu sesli mesaj bu telefonda çalınamıyor (eski biçimde kaydedilmiş)' : errText(err));
+    }
   };
 }
 

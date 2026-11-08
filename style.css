@@ -695,3 +695,11 @@ body.kb-open .chat-wrap { top: var(--vvt, 0px); height: var(--vvh, 100%); bottom
 body.kb-open .chat-head .sub, body.kb-open .pin-bar { display: none; }
 body.kb-open .sheet-backdrop { top: var(--vvt, 0px); height: var(--vvh, 100%); bottom: auto; }
 body.kb-open .sheet { max-height: calc(var(--vvh, 100vh) - 20px); }
+
+/* ses kaydı: kayıt çubuğu ekranı kaydırmadan üstte; kayıt sırasında başka yere dokunulmaz */
+.rec-bar { position: fixed; left: 12px; right: 12px; top: calc(var(--safe-top) + 10px); z-index: 120; background: var(--navy); color: #FFF;
+  border-radius: 18px; padding: 12px 14px; box-shadow: 0 12px 30px rgba(19,50,75,.35); }
+.rec-bar .small { color: #C5D2DE !important; }
+body.recording * { pointer-events: none !important; -webkit-user-select: none !important; user-select: none !important; }
+body.recording .round-btn.armed, body.recording .round-btn.armed * { pointer-events: auto !important; }
+.round-btn { -webkit-tap-highlight-color: transparent; }
