@@ -689,3 +689,9 @@ html, body { overflow-x: hidden; }
 .sys-ph b { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.45); color: #FFF; font-size: 17px; }
 .link-btn { border: none; background: none; color: var(--accent); font-weight: 700; font-size: 13px; padding: 8px 0 0; display: inline-flex; align-items: center; gap: 2px; }
 .link-btn svg { width: 15px; height: 15px; }
+
+/* klavye açıkken: sohbet ve pencereler görünen alana oturur, sayfa kaymaz */
+body.kb-open .chat-wrap { top: var(--vvt, 0px); height: var(--vvh, 100%); bottom: auto; }
+body.kb-open .chat-head .sub, body.kb-open .pin-bar { display: none; }
+body.kb-open .sheet-backdrop { top: var(--vvt, 0px); height: var(--vvh, 100%); bottom: auto; }
+body.kb-open .sheet { max-height: calc(var(--vvh, 100vh) - 20px); }

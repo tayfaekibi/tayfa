@@ -111,17 +111,29 @@ export function unmount() {
   if (!C.mounted) return;
   C.mounted = false;
   if (C.channel) { sb.removeChannel(C.channel); C.channel = null; }
-  window.visualViewport?.removeEventListener('resize', onVV);
 }
 
 // iPhone klavyesi açılınca yazma alanı klavyenin üstünde kalsın
+// Klavye açılınca iPhone sayfayı yukarı kaydırıyor; sohbeti görünen alana (klavyenin üstüne) oturt
 function onVV() {
   const vv = window.visualViewport; if (!vv) return;
-  const kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-  document.documentElement.style.setProperty('--kb', kb + 'px');
-  document.body.classList.toggle('kb-open', kb > 80);
+  const open = window.innerHeight - vv.height > 120;
+  const was = document.body.classList.contains('kb-open');
+  const r = document.documentElement.style;
+  r.setProperty('--vvt', vv.offsetTop + 'px');
+  r.setProperty('--vvh', vv.height + 'px');
+  r.setProperty('--kb', Math.max(0, window.innerHeight - vv.height - vv.offsetTop) + 'px');
+  document.body.classList.toggle('kb-open', open);
+  if (open && !was) {
+    const l = document.getElementById('chat-list') || document.getElementById('gc-list');
+    if (l) requestAnimationFrame(() => { l.scrollTop = l.scrollHeight; });
+  }
 }
-function fitViewport() { window.visualViewport?.addEventListener('resize', onVV); onVV(); }
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', onVV);
+  window.visualViewport.addEventListener('scroll', onVV);
+}
+function fitViewport() { onVV(); }
 
 // ------------------------------------------------------------------ veri
 async function loadMessages() {
