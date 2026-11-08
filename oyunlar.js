@@ -251,7 +251,8 @@ export async function renderGame() {
 // Canlı bağlantı koparsa (iPhone arka plandan dönünce sık olur) oyunu düzenli olarak sunucudan tazele
 let pollT = null;
 async function pollGame() {
-  if (S.view !== 'game' || !G.game || document.visibilityState !== 'visible' || G.busy || G.animating) return;
+  if (S.view !== 'game' || !G.game || document.visibilityState !== 'visible' || G.animating) return;
+  if (G.busy && Date.now() - (G.busyAt || 0) < 15000) return;
   const { data } = await sb.from('games').select('*').eq('id', G.game.id).maybeSingle();
   if (!data || data.updated_at === G.game.updated_at) return;
   const newHand = G.game.state?.hand !== data.state?.hand;
@@ -307,10 +308,13 @@ async function reloadGame() {
 }
 
 async function call(action, extra = {}) {
-  if (G.busy) return;
-  G.busy = true; drawGame();
+  // Önceki istek takılı kaldıysa (iPhone arka plana alınınca olabiliyor) 15 sn sonra kilidi aç
+  if (G.busy && Date.now() - (G.busyAt || 0) < 15000) return false;
+  G.busy = true; G.busyAt = Date.now(); drawGame();
   try {
-    const { data, error } = await sb.functions.invoke(G.game.kind === 'king' ? 'king' : 'tavla', { body: { action, game_id: G.game.id, ...extra } });
+    const req = sb.functions.invoke(G.game.kind === 'king' ? 'king' : 'tavla', { body: { action, game_id: G.game.id, ...extra } });
+    const late = new Promise((_, rej) => setTimeout(() => rej(new Error('Sunucu geç cevap verdi, masa yenileniyor')), 15000));
+    const { data, error } = await Promise.race([req, late]);
     if (error) {
       let msg = error.message;
       try { const j = await error.context?.json?.(); if (j?.hata) msg = j.hata; } catch (_) { /* */ }
@@ -321,7 +325,11 @@ async function call(action, extra = {}) {
     await reloadGame();
     loadMyTurns().then(updateTabDots).catch(() => {});
     return true;
-  } catch (e) { G.busy = false; toast(errText(e)); drawGame(); return false; }
+  } catch (e) {
+    G.busy = false; toast(errText(e));
+    await reloadGame().catch(() => drawGame()); // masayı sunucudaki hâliyle eşitle
+    return false;
+  }
 }
 
 function gameMenu() {

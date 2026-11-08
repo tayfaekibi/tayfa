@@ -53,8 +53,10 @@ export function draw(game, box, call) {
     const u = game.players[i];
     const turn = game.status === 'active' && st.turn === i;
     const isCh = st.phase === 'choose' && st.chooser === i;
-    return `<div class="k-seat ${posOf(i, mine)} ${turn ? 'turn' : ''}" data-vu="${u}">${avatar(nameOf(u), u)}<i class="k-vb" aria-hidden="true">${svg('headset')}</i>
-      <b>${esc(nameOf(u).split(' ')[0])}</b><span>${st.score[i]} · ${st.counts[i]} kart${isCh ? ' · seçiyor' : ''}</span></div>`;
+    const tb = st.tricksBy?.[i] || 0, hp = st.handPts?.[i] || 0;
+    return `<div class="k-seat ${posOf(i, mine)} ${turn ? 'turn' : ''}" data-vu="${u}" data-seat="${i}">${avatar(nameOf(u), u)}<i class="k-vb" aria-hidden="true">${svg('headset')}</i>
+      <b>${esc(nameOf(u).split(' ')[0])}</b><span>Toplam ${st.score[i]}${isCh ? ' · seçiyor' : ''}</span>
+      ${st.phase === 'play' ? `<em class="k-hp ${hp < 0 ? 'neg' : hp > 0 ? 'pos' : ''}">${tb} el${hp ? ` · ${hp > 0 ? '+' : ''}${hp}` : ''}</em>` : ''}</div>`;
   };
   // Ortadaki kartlar: oynanan el, el bittiyse bir önceki el (kim aldı)
   let center = '';
@@ -105,7 +107,7 @@ export function draw(game, box, call) {
       return cardHtml(c, `${myTurn && st.phase === 'play' && !ok ? 'dim' : ''} ${KU.sel === c ? 'sel' : ''}`, `data-kc="${c}" role="button" tabindex="0"`);
     }).join('')}</div>` : ''}
     ${playing && game.status === 'active' ? `<div class="k-me">${avatar(nameOf(me()), me())}<div class="grow"><b>Sen · ${st.score[mine]}</b>
-      <span class="small">${st.phase === 'play' ? `Bu el: ${st.handPts[mine]}` : `${st.hand}. el / 20`}</span></div>
+      <span class="small">${st.phase === 'play' ? `Bu el: ${st.tricksBy?.[mine] || 0} el · ${st.handPts[mine] > 0 ? '+' : ''}${st.handPts[mine]}` : `${st.hand}. el / 20`}</span></div>
       <button class="btn small" id="k-table">Puanlar</button>
       ${myTurn && st.phase === 'play' ? `<button class="btn primary" id="k-play" ${KU.sel && !KU.busy ? '' : 'disabled'}>Oyna</button>` : ''}</div>` : ''}
     ${game.status === 'active' && !playing ? '<button class="btn block" id="k-table">Puan tablosu</button>' : ''}
@@ -140,8 +142,56 @@ export function draw(game, box, call) {
     await call('choose', { type: 'koz', trump: s });
   });
   box.querySelectorAll('#k-table').forEach((b) => b.onclick = () => scoreSheet(game));
-  if (playing && game.status === 'active') Voice.watch(game.id, game.players, drawVoice);
+  if (playing && game.status === 'active') {
+    Voice.watch(game.id, game.players, drawVoice);
+    Voice.setTreatHandler((p) => showTreat(game, p));
+    box.querySelectorAll('[data-seat]').forEach((el) => {
+      const u = game.players[+el.dataset.seat];
+      if (u === me()) return;
+      let t = null;
+      const start = () => { t = setTimeout(() => { t = null; navigator.vibrate?.(15); treatMenu(u); }, 450); };
+      const cancel = () => { if (t) { clearTimeout(t); t = null; } };
+      el.addEventListener('touchstart', start, { passive: true });
+      el.addEventListener('touchend', cancel); el.addEventListener('touchmove', cancel, { passive: true });
+      el.addEventListener('contextmenu', (e) => { e.preventDefault(); cancel(); treatMenu(u); });
+    });
+  }
   drawVoice();
+}
+
+// İkram: oyuncunun üstüne basılı tutunca
+const TREATS = { cay: ['☕', 'Çay'], viski: ['🥃', 'Viski'], ayran: ['🥛', 'Ayran'], su: ['🧊', 'Soğuk su'] };
+function treatMenu(u) {
+  const first = esc(nameOf(u).split(' ')[0]);
+  openSheet(`${sheetHead(`${first} için ikram`)}
+    <div class="treats">${Object.entries(TREATS).map(([k, [e, n]]) => `<button class="treat" data-tr="${k}"><span>${e}</span>${n}</button>`).join('')}</div>`, () => {
+    document.querySelectorAll('[data-tr]').forEach((b) => b.onclick = () => { closeSheet(); Voice.sendTreat(u, b.dataset.tr); });
+  });
+}
+function showTreat(game, p) {
+  const tr = TREATS[p.kind]; if (!tr) return;
+  const to = document.querySelector(`.k-seat[data-vu="${p.to}"]`) || (p.to === me() ? document.querySelector('.k-me') : null);
+  const from = document.querySelector(`.k-seat[data-vu="${p.from}"]`) || (p.from === me() ? document.querySelector('.k-me') : null);
+  const fromName = nameOf(p.from).split(' ')[0], toName = nameOf(p.to).split(' ')[0];
+  if (p.to === me() && p.from !== me()) toast(`${fromName} sana ${tr[1].toLocaleLowerCase('tr-TR')} ısmarladı ${tr[0]}`, 3500);
+  if (!to) return;
+  const b = to.getBoundingClientRect();
+  const a = from ? from.getBoundingClientRect() : { left: window.innerWidth / 2, top: window.innerHeight - 120, width: 0, height: 0 };
+  const el = document.createElement('span');
+  el.className = 'treat-fly'; el.textContent = tr[0];
+  const ax = a.left + a.width / 2, ay = a.top + a.height / 2, bx = b.left + b.width / 2, by = b.top + 10;
+  Object.assign(el.style, { left: `${ax - 18}px`, top: `${ay - 18}px` });
+  document.body.appendChild(el);
+  el.animate([{ transform: 'translate(0,0) scale(.6)', opacity: 0.4 }, { transform: `translate(${(bx - ax) / 2}px, ${(by - ay) / 2 - 60}px) scale(1.4)`, opacity: 1, offset: 0.5 },
+    { transform: `translate(${bx - ax}px, ${by - ay}px) scale(1)`, opacity: 1 }], { duration: 900, easing: 'ease-in-out', fill: 'forwards' })
+    .finished.then(() => {
+      el.remove();
+      const tag = document.createElement('span');
+      tag.className = 'treat-tag'; tag.innerHTML = `<b>${tr[0]}</b>${esc(fromName)}`;
+      to.appendChild(tag);
+      setTimeout(() => tag.remove(), 8000);
+    }).catch(() => el.remove());
+  if (p.from === me()) toast(`${toName} için ${tr[1].toLocaleLowerCase('tr-TR')} gönderildi ${tr[0]}`, 2000);
 }
 
 // Canlı ses: tek düğmeyle katıl, seste olanlar koltuklarda kulaklıkla görünür, konuşan parlar

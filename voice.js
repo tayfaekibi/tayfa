@@ -10,6 +10,14 @@ const V = {
 };
 const emit = () => { try { V.onChange?.(); } catch (_) { /* */ } };
 
+// İkram: masadakilere çay, viski… (sadece anlık gösterilir, kaydedilmez)
+export function setTreatHandler(fn) { V.onTreat = fn; }
+export function sendTreat(to, kind) {
+  const p = { from: me(), to, kind, at: Date.now() };
+  V.ch?.send({ type: 'broadcast', event: 'ikram', payload: p });
+  V.onTreat?.(p);
+}
+
 export const state = () => ({
   joined: V.joined, muted: V.muted,
   inVoice: [...V.present.keys()],           // seste olanlar (ben dahil)
@@ -34,6 +42,7 @@ export function watch(room, players, onChange) {
     emit();
   });
   V.ch.on('broadcast', { event: 'sig' }, ({ payload }) => onSignal(payload));
+  V.ch.on('broadcast', { event: 'ikram' }, ({ payload }) => { if (V.players.includes(payload?.from)) V.onTreat?.(payload); });
   V.ch.subscribe();
 }
 

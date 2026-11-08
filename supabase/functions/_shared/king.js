@@ -145,7 +145,7 @@ export function newState(rndChooser = 0) {
   return {
     kind: 'king', hand: 1, chooser: rndChooser, phase: 'choose', contract: null,
     turn: rndChooser, leader: rndChooser, trick: [], tricksDone: 0, penTaken: 0, broken: false,
-    handPts: [0, 0, 0, 0], score: [0, 0, 0, 0], counts: [13, 13, 13, 13],
+    handPts: [0, 0, 0, 0], tricksBy: [0, 0, 0, 0], score: [0, 0, 0, 0], counts: [13, 13, 13, 13],
     picks: [0, 1, 2, 3].map(() => ({ koz: 0, ceza: 0 })), used: {}, history: [], lastTrick: null,
   };
 }
@@ -163,6 +163,8 @@ export function applyPlay(st, seat, card) {
   st.tricksDone += 1;
   st.penTaken = (st.penTaken || 0) + cards.filter((x) => isPenaltyCard(c.type, x)).length;
   st.handPts[winner] += trickPoints(c.type, cards, st.tricksDone);
+  st.tricksBy = st.tricksBy || [0, 0, 0, 0];
+  st.tricksBy[winner] += 1; // bu elde kim kaç el aldı
   st.lastTrick = { cards: st.trick, winner };
   st.trick = [];
   st.leader = winner; st.turn = winner;
@@ -174,7 +176,7 @@ export function applyPlay(st, seat, card) {
   st.hand += 1;
   st.chooser = (st.chooser + 1) % 4;
   st.phase = 'choose'; st.contract = null; st.turn = st.chooser; st.leader = st.chooser;
-  st.tricksDone = 0; st.penTaken = 0; st.broken = false; st.handPts = [0, 0, 0, 0]; st.counts = [13, 13, 13, 13];
+  st.tricksDone = 0; st.penTaken = 0; st.broken = false; st.handPts = [0, 0, 0, 0]; st.counts = [13, 13, 13, 13]; st.tricksBy = [0, 0, 0, 0];
   return { trickDone: true, winner, handDone: true };
 }
 

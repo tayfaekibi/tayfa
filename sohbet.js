@@ -548,17 +548,35 @@ async function sendText() {
 
 // ------------------------------------------------------------------ sesli mesaj
 let recEndedAt = 0;
+// Güvenlik ağı: kayıt yapılmıyorken "kayıt" kilidi kalırsa (dokunmalar engellenir, yazılamaz) hemen aç
+function unstickRecording() {
+  if (document.body.classList.contains('recording') && !document.querySelector('.round-btn.rec')) {
+    if (!unstickRecording.since) unstickRecording.since = Date.now();
+    if (Date.now() - unstickRecording.since > 1200) {
+      document.body.classList.remove('recording');
+      document.querySelectorAll('.round-btn.armed').forEach((b) => b.classList.remove('armed'));
+      unstickRecording.since = 0;
+    }
+  } else unstickRecording.since = 0;
+}
+setInterval(unstickRecording, 500);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'visible') { document.body.classList.remove('recording'); } });
 // Kayıt bittikten hemen sonra gelen sahte dokunmaları yut
 document.addEventListener('click', (e) => {
-  if (Date.now() - recEndedAt < 600 && !e.target.closest?.('.voice-play')) { e.preventDefault(); e.stopPropagation(); }
+  if (Date.now() - recEndedAt < 600 && !e.target.closest?.('.voice-play, textarea, input')) { e.preventDefault(); e.stopPropagation(); }
 }, true);
+document.addEventListener('touchstart', (e) => {
+  if (e.target.closest?.('textarea, input') && document.body.classList.contains('recording') && !document.querySelector('.round-btn.rec')) {
+    document.body.classList.remove('recording');
+  }
+}, { capture: true, passive: true });
 function bindRecorder(btn, canRecord, onDone = sendVoice) {
   let rec = null, chunks = [], t0 = 0, timer = null, y0 = 0, cancelled = false, stream = null, pressed = false;
   const bar = () => document.getElementById('rec-bar');
-  const endUi = () => {
+  const endUi = (recorded) => {
     bar()?.classList.add('hidden');
     btn.classList.remove('rec', 'armed');
-    recEndedAt = Date.now();
+    if (recorded) recEndedAt = Date.now();
     setTimeout(() => document.body.classList.remove('recording'), 450); // parmağı kaldırınca altta kalana dokunulmuş sayılmasın
   };
   const stop = (send) => {
@@ -566,7 +584,7 @@ function bindRecorder(btn, canRecord, onDone = sendVoice) {
     cancelled = !send;
     clearInterval(timer);
     try { rec.stop(); } catch (_) { /* */ }
-    endUi();
+    endUi(true);
   };
   // iPhone: uzun basışta metin seçme / büyüteç / menü çıkmasın
   btn.addEventListener('touchstart', (e) => { if (canRecord()) e.preventDefault(); }, { passive: false });

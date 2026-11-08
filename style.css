@@ -720,3 +720,18 @@ body.recording .round-btn.armed, body.recording .round-btn.armed * { pointer-eve
 .k-seat.in-voice .k-vb { display: flex; }
 .k-seat.speaking .av { box-shadow: 0 0 0 3px #7BE08A, 0 0 14px 4px rgba(123,224,138,.6); }
 .k-seat.v-fail .k-vb { background: #B33A1E; }
+
+/* King: el durumu ve ikram */
+.k-table { height: 368px; }
+.k-center { top: 56%; }
+.k-seat.left, .k-seat.right { top: 128px; }
+.k-hp { font-style: normal; font-size: 11px; font-weight: 800; padding: 2px 7px; border-radius: 9px; background: rgba(0,0,0,.28); color: #FFF; margin-top: 1px; }
+.k-hp.neg { background: #B33A1E; } .k-hp.pos { background: #1F9D55; }
+.k-seat { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.treats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.treat { border: 1px solid var(--line); background: var(--card); border-radius: 18px; height: 96px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 15px; font-weight: 700; color: var(--ink); }
+.treat span { font-size: 38px; line-height: 1; }
+.treat-fly { position: fixed; z-index: 130; font-size: 36px; width: 36px; height: 36px; line-height: 36px; text-align: center; pointer-events: none; }
+.treat-tag { position: absolute; top: -10px; right: -6px; display: inline-flex; align-items: center; gap: 3px; background: #FFF; color: #16222E; border-radius: 12px; padding: 2px 7px 2px 4px; font-size: 11px; font-weight: 700; box-shadow: 0 2px 8px rgba(0,0,0,.25); animation: drop .25s ease; white-space: nowrap; z-index: 3; }
+.treat-tag b { font-size: 16px; }
+.k-me { position: relative; }
