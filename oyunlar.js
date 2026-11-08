@@ -267,6 +267,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 
 export function closeGame() {
   stopPoll();
+  KU.stopVoice();
   if (G.channel) { sb.removeChannel(G.channel); G.channel = null; }
   stopPresence();
 }

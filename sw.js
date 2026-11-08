@@ -4,13 +4,13 @@
 //   ve uygulama kendini yeniler.
 // - Fotoğraflar da telefonda saklanır, ikinci açılışta internetten tekrar indirilmez.
 // - Bildirime dokununca ilgili ekran açılır.
-const CACHE = 'tayfa-v3.3.6';
+const CACHE = 'tayfa-v3.4.0';
 const PHOTO_CACHE = 'tayfa-foto-v1';
 const ROUTE_CACHE = 'tayfa-yonlendirme';
 const MAX_PHOTOS = 600;
 const SHELL = [
   './', 'index.html', 'style.css', 'app.js', 'config.js', 'manifest.webmanifest',
-  'anilar.js', 'sohbet.js', 'oyunlar.js', 'kingui.js', 'e2e.js', 'supabase/functions/_shared/tavla.js', 'supabase/functions/_shared/king.js',
+  'anilar.js', 'sohbet.js', 'oyunlar.js', 'kingui.js', 'voice.js', 'e2e.js', 'supabase/functions/_shared/tavla.js', 'supabase/functions/_shared/king.js',
   'vendor/supabase.js', 'vendor/maplibre-gl.js', 'vendor/maplibre-gl.css',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'aydinlatma.html',
 ];

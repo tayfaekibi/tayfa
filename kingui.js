@@ -1,6 +1,7 @@
 // King masası (4 kişi). Kurallar: supabase/functions/_shared/king.js — sunucu da aynısını kullanır.
 import { sb, S, esc, svg, avatar, toast, errText, openSheet, closeSheet, sheetHead, me, nameOf } from './app.js';
 import * as K from './supabase/functions/_shared/king.js';
+import * as Voice from './voice.js';
 
 const KU = { hand: [], gameId: null, sel: null, busy: false, pickType: null };
 
@@ -52,7 +53,7 @@ export function draw(game, box, call) {
     const u = game.players[i];
     const turn = game.status === 'active' && st.turn === i;
     const isCh = st.phase === 'choose' && st.chooser === i;
-    return `<div class="k-seat ${posOf(i, mine)} ${turn ? 'turn' : ''}">${avatar(nameOf(u), u)}
+    return `<div class="k-seat ${posOf(i, mine)} ${turn ? 'turn' : ''}" data-vu="${u}">${avatar(nameOf(u), u)}<i class="k-vb" aria-hidden="true">${svg('headset')}</i>
       <b>${esc(nameOf(u).split(' ')[0])}</b><span>${st.score[i]} · ${st.counts[i]} kart${isCh ? ' · seçiyor' : ''}</span></div>`;
   };
   // Ortadaki kartlar: oynanan el, el bittiyse bir önceki el (kim aldı)
@@ -91,6 +92,7 @@ export function draw(game, box, call) {
       <span class="k-tr">${st.tricksDone}/13</span></div>` : '';
 
   box.innerHTML = `
+    ${playing && game.status === 'active' ? '<div id="k-voice"></div>' : ''}
     ${banner}
     <div class="k-table">
       ${[0, 1, 2, 3].filter((i) => i !== mine || !playing).map(seatBox).join('')}
@@ -138,7 +140,34 @@ export function draw(game, box, call) {
     await call('choose', { type: 'koz', trump: s });
   });
   box.querySelectorAll('#k-table').forEach((b) => b.onclick = () => scoreSheet(game));
+  if (playing && game.status === 'active') Voice.watch(game.id, game.players, drawVoice);
+  drawVoice();
 }
+
+// Canlı ses: tek düğmeyle katıl, seste olanlar koltuklarda kulaklıkla görünür, konuşan parlar
+export function drawVoice() {
+  const el = document.getElementById('k-voice');
+  const v = Voice.state();
+  document.querySelectorAll('[data-vu]').forEach((s) => {
+    const u = s.dataset.vu;
+    s.classList.toggle('in-voice', v.inVoice.includes(u));
+    s.classList.toggle('speaking', v.speaking.has(u));
+    s.classList.toggle('v-fail', v.failed.has(u));
+  });
+  if (!el) return;
+  const others = v.inVoice.filter((u) => u !== me());
+  if (!v.joined) {
+    el.innerHTML = `<button class="k-vjoin" id="kv-join">${svg('headset')}<span><b>Canlı sese katıl</b><small>${others.length ? `${others.map((u) => esc(nameOf(u).split(' ')[0])).join(', ')} seste` : 'Masadakilerle konuş'}</small></span></button>`;
+    document.getElementById('kv-join').onclick = () => Voice.join();
+  } else {
+    el.innerHTML = `<div class="k-von ${v.speaking.has(me()) ? 'speaking' : ''}"><span class="dot"></span><span class="grow"><b>Canlı ses açık</b><small>${others.length ? `${others.map((u) => esc(nameOf(u).split(' ')[0])).join(', ')} ile` : 'Diğerleri bekleniyor…'}</small></span>
+      <button class="k-vbtn ${v.muted ? 'off' : ''}" id="kv-mute" aria-label="${v.muted ? 'Mikrofonu aç' : 'Mikrofonu kapat'}">${svg(v.muted ? 'micOff' : 'mic')}</button>
+      <button class="k-vbtn leave" id="kv-leave" aria-label="Sesten ayrıl">${svg('phoneOff')}</button></div>`;
+    document.getElementById('kv-mute').onclick = () => Voice.toggleMute();
+    document.getElementById('kv-leave').onclick = () => Voice.leave();
+  }
+}
+export function stopVoice() { Voice.stopAll(); }
 
 export function scoreSheet(game) {
   const st = game.state;

@@ -703,3 +703,20 @@ body.kb-open .sheet { max-height: calc(var(--vvh, 100vh) - 20px); }
 body.recording * { pointer-events: none !important; -webkit-user-select: none !important; user-select: none !important; }
 body.recording .round-btn.armed, body.recording .round-btn.armed * { pointer-events: auto !important; }
 .round-btn { -webkit-tap-highlight-color: transparent; }
+
+/* King: canlı ses */
+.k-vjoin { display: flex; align-items: center; gap: 12px; width: 100%; border: none; border-radius: 18px; padding: 10px 14px; background: var(--navy); color: #FFF; text-align: left; box-shadow: 0 8px 20px rgba(19,50,75,.22); }
+.k-vjoin svg { width: 26px; height: 26px; flex-shrink: 0; color: var(--coral); }
+.k-vjoin span { display: flex; flex-direction: column; } .k-vjoin b { font-size: 15px; } .k-vjoin small { font-size: 12px; color: #C5D2DE; }
+.k-von { display: flex; align-items: center; gap: 10px; border-radius: 18px; padding: 8px 8px 8px 14px; background: #1F6B45; color: #FFF; }
+.k-von .dot { width: 10px; height: 10px; border-radius: 50%; background: #7BE08A; flex-shrink: 0; }
+.k-von.speaking .dot { box-shadow: 0 0 0 5px rgba(123,224,138,.35); }
+.k-von .grow { flex: 1; min-width: 0; display: flex; flex-direction: column; } .k-von b { font-size: 14px; } .k-von small { font-size: 12px; color: #CFEBD9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.k-vbtn { width: 44px; height: 44px; border-radius: 50%; border: none; background: rgba(255,255,255,.18); color: #FFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.k-vbtn svg { width: 21px; height: 21px; } .k-vbtn.off { background: #FFF; color: #B33A1E; } .k-vbtn.leave { background: #D62828; }
+.k-seat { position: absolute; }
+.k-seat .k-vb { display: none; position: absolute; top: -4px; left: calc(50% + 10px); width: 22px; height: 22px; border-radius: 50%; background: #1F6B45; color: #FFF; align-items: center; justify-content: center; border: 2px solid #24493A; font-style: normal; }
+.k-seat .k-vb svg { width: 12px; height: 12px; }
+.k-seat.in-voice .k-vb { display: flex; }
+.k-seat.speaking .av { box-shadow: 0 0 0 3px #7BE08A, 0 0 14px 4px rgba(123,224,138,.6); }
+.k-seat.v-fail .k-vb { background: #B33A1E; }
