@@ -65,8 +65,9 @@ Deno.serve(async (req) => {
 
     // Oyun ekranı açık olan kişiye o oyunla ilgili bildirim gönderme (son 45 sn içinde ekrandaysa)
     const since = new Date(Date.now() - 45 * 1000).toISOString();
-    const { data: pres } = await db.from("presence").select("user_id, game_id").gt("seen_at", since).in("user_id", userIds);
+    const { data: pres } = await db.from("presence").select("user_id, game_id, place").gt("seen_at", since).in("user_id", userIds);
     const viewing = new Map((pres ?? []).filter((r) => r.game_id).map((r) => [r.user_id, r.game_id]));
+    const inChat = new Set((pres ?? []).filter((r) => r.place === "sohbet").map((r) => r.user_id));
     const gameOf = (tag: string | null) => tag?.match(/^(?:tavla|king|oyun-sohbet)-(.+)$/)?.[1] ?? null;
 
     let sent = 0;
@@ -79,6 +80,8 @@ Deno.serve(async (req) => {
         if (g && viewing.get(sub.user_id) === g) continue;
         // Oyun oynarken genel sohbet bildirimi gelmez (uygulamada sayı olarak görünür); @bahis ve yanıtlar gelir
         if (item.tag?.startsWith("sohbet-") && viewing.has(sub.user_id)) continue;
+        // Sohbet ekranı açıkken genel sohbetten (bahis ve yanıt dahil) telefon bildirimi gelmez, mesaj zaten ekranda
+        if ((item.tag?.startsWith("sohbet-") || item.tag?.startsWith("bahis-")) && inChat.has(sub.user_id)) continue;
         const payload = JSON.stringify({
           title: item.title,
           body: item.body,

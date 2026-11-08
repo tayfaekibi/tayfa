@@ -92,6 +92,7 @@ export async function mount() {
   C.mounted = true;
   bindHeader();
   document.getElementById('chat-mute')?.addEventListener('click', muteSheet);
+  if (!chatPresT) startChatPresence();
   bindComposer();
   fitViewport();
   try {
@@ -107,9 +108,27 @@ export async function mount() {
   }
 }
 
+// Sohbet açıkken sunucuya haber ver (bu sırada genel sohbetten telefon bildirimi gelmesin)
+let chatPresT = null;
+function chatBeat() { if (C.mounted && document.visibilityState === 'visible') rpc('set_presence_place', { p_place: 'sohbet' }).catch(() => {}); }
+function startChatPresence() {
+  stopChatPresence(true);
+  chatBeat();
+  chatPresT = setInterval(chatBeat, 20000);
+}
+function stopChatPresence(silent) {
+  if (chatPresT) { clearInterval(chatPresT); chatPresT = null; }
+  if (!silent) rpc('set_presence', { p_game: null }).catch(() => {});
+}
+document.addEventListener('visibilitychange', () => {
+  if (!C.mounted) return;
+  if (document.visibilityState === 'visible') startChatPresence(); else stopChatPresence();
+});
+
 export function unmount() {
   if (!C.mounted) return;
   C.mounted = false;
+  stopChatPresence(S.view === 'game'); // oyuna geçiliyorsa oyun ekranı kendi bilgisini gönderir
   if (C.channel) { sb.removeChannel(C.channel); C.channel = null; }
 }
 
