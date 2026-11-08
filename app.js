@@ -181,7 +181,8 @@ async function loadInbox() {
   if (S.ctx.status !== 'active') return;
   const { data, error } = await sb.from('inbox').select('*').eq('user_id', me()).order('created_at', { ascending: false }).limit(80);
   if (error) throw error;
-  S.inbox = data || [];
+  const dayAgo = Date.now() - 864e5;
+  S.inbox = (data || []).filter((i) => new Date(i.created_at).getTime() > dayAgo);
   S.inboxUnread = S.inbox.filter((i) => !i.read_at).length;
   updateBell();
 }
@@ -200,7 +201,7 @@ const kindOf = (i) => {
   if (/^(tavla|oyun-sohbet)-/.test(t) || u.includes('#oyun')) return ['game', 'dice'];
   if (/^(bahis|sohbet)-/.test(t) || u.includes('#sohbet')) return ['chat', 'chat'];
   if (/^(plan|onay|yorum)-/.test(t) || u.includes('#plan') || u.includes('#yonetim')) return ['plan', 'cal'];
-  if (u.includes('#album') || u.includes('#anilar')) return ['photo', 'img'];
+  if (/^(album|tek)-/.test(t) || u.includes('#album') || u.includes('#anilar') || u.includes('#yeni')) return ['photo', 'img'];
   return ['other', 'bell'];
 };
 async function openInboxItem(i) {
@@ -227,7 +228,8 @@ function ago(d) {
   return fmt.time(d);
 }
 function renderInbox() {
-  const list = S.inbox || [];
+  const dayAgo = Date.now() - 864e5; // bildirimler 1 gün saklanır
+  const list = (S.inbox || []).filter((i) => new Date(i.created_at).getTime() > dayAgo);
   let body = ''; let day = '';
   let group = [];
   const flush = () => { if (group.length) body += `<div class="inbox">${group.join('')}</div>`; group = []; };
@@ -244,7 +246,7 @@ function renderInbox() {
     <div class="g-top"><button class="icon-btn" id="ib-back" aria-label="Geri">${svg('back')}</button>
       <div class="grow"><h1 style="font-size:22px">Bildirimler</h1></div>
       ${S.inboxUnread ? '<button class="btn small" id="ib-all" style="border:none;background:none;color:var(--accent)">Tümü okundu</button>' : ''}</div>
-    ${list.length ? body : `<div class="card"><div class="empty">${svg('bell')}<b style="color:var(--ink)">Bildirim yok</b><span>Yeni planlar, oyun sırası ve sana gelen yanıtlar burada görünür.</span></div></div>`}
+    ${list.length ? body : `<div class="card"><div class="empty">${svg('bell')}<b style="color:var(--ink)">Bildirim yok</b><span>Yeni etkinlikler, oyun davetleri ve sana gelen yanıtlar burada görünür. Bildirimler 1 gün saklanır.</span></div></div>`}
     <p class="small" style="text-align:center">Son 30 günün bildirimleri burada durur</p>
   </main></div>`;
   document.getElementById('ib-back').onclick = () => goBack();
@@ -267,6 +269,7 @@ function atTarget(url) {
 }
 function showInApp(i) {
   if (document.visibilityState !== 'visible' || atTarget(i.url)) return;
+  if (pushState() === 'granted') return; // telefon bildirimi zaten geliyor, ikinci kez gösterme
   document.querySelector('.inapp')?.remove();
   const [, ic] = kindOf(i);
   const el = document.createElement('button');
@@ -499,6 +502,14 @@ export function route(hash) {
   else if (k === 'anilar') { S.view = 'main'; S.tab = 'memory'; }
   else if (k === 'oyunlar') { S.view = 'main'; S.tab = 'game'; }
   else if (k === 'bildirimler') { S.view = 'inbox'; }
+  else if (k === 'yeni' && id) { // yeni fotoğraflar: ana sayfanın üstünde tam ekran
+    const [, , count, ts] = String(hash).replace(/^#/, '').split('/');
+    if (S.view !== 'main' && S.view !== 'album') { S.view = 'main'; S.tab = 'home'; }
+    closeSheet(); render();
+    if (location.hash) history.replaceState(null, '', location.pathname);
+    Anilar.openNew({ album: id, count, ts });
+    return true;
+  }
   else if (k === 'ana' || k === '') { S.view = 'main'; S.tab = 'home'; }
   else if (k === 'plan' && id) {
     const e = S.events.find((x) => x.id === id);
@@ -710,7 +721,7 @@ function renderMain() {
   const prevTab = renderMain.lastTab; renderMain.lastTab = S.tab;
   $app.innerHTML = `<div class="screen ${prevTab && prevTab !== S.tab ? 'enter' : ''}">
     <main class="content ${S.tab === 'chat' ? 'chat-content' : ''}">${body}</main>
-    ${S.tab === 'home' ? `<button class="fab" id="fab">${svg('plus')}${isAdmin() ? 'Plan aç' : 'Plan öner'}</button>` : ''}
+    ${S.tab === 'home' ? `<button class="fab" id="fab">${svg('plus')}${isAdmin() ? 'Etkinlik' : 'Etkinlik öner'}</button>` : ''}
     <nav class="tabbar" aria-label="Ana menü">${tabs.map(([k, l, i]) => `<button class="tab ${S.tab === k ? 'on' : ''}" data-tab="${k}" aria-label="${l}">${svg(i)}<span>${l}</span><i class="tab-dot hidden" data-dot="${k}"></i><i class="tab-n hidden" data-n="${k}"></i></button>`).join('')}</nav>
   </div>`;
   $app.querySelectorAll('[data-tab]').forEach((b) => b.onclick = () => { S.tab = b.dataset.tab; render(); window.scrollTo(0, 0); });
@@ -767,7 +778,7 @@ function heroCard(e) {
   if (yes.length) parts.push(`${yes.length} kişi geliyor`);
   if (waiting) parts.push(`${waiting} kişi bekleniyor`);
   return `<section class="next" id="ev-${e.id}">
-    <div class="next-k"><span>SIRADAKİ PLAN · ${when}</span><span data-wx="${e.id}" data-short="1">${wxChip(WX.get(e.id), true)}</span></div>
+    <div class="next-k"><span>SIRADAKİ ETKİNLİK · ${when}</span><span data-wx="${e.id}" data-short="1">${wxChip(WX.get(e.id), true)}</span></div>
     <div class="ev-head">${dateBox(e)}<div style="flex:1;min-width:0"><h2>${esc(e.title)}</h2>
       <div class="ev-meta"><span>${svgInline('clock')}${esc(fmt.time(d))}</span>${e.place ? `<span>${svgInline('pin')}${esc(e.place)}</span>` : ''}</div></div></div>
     ${e.note ? `<p class="ev-note">${esc(e.note)}</p>` : ''}
@@ -780,7 +791,7 @@ function heroCard(e) {
     </div>
     <div class="links">
       <button class="btn small" data-com="${e.id}">${svg('comment')}Yorumlar${S.commentCounts?.[e.id] ? ' · ' + S.commentCounts[e.id] : ''}</button>
-      ${isAdmin() ? `<button class="btn small" data-del="${e.id}">Planı sil</button>` : ''}
+      ${isAdmin() ? `<button class="btn small" data-del="${e.id}">Etkinliği sil</button>` : ''}
     </div>
   </section>`;
 }
@@ -841,16 +852,16 @@ function homeView() {
   let h = topBlock();
   let o = '';
   if (!upcoming.length) {
-    o += `<div class="next"><div class="empty">${svg('cal')}<b style="color:var(--ink)">Henüz plan yok</b><span>${isAdmin() ? 'İlk planı sen aç.' : 'Bir plan öner, yönetici onaylayınca herkese duyurulsun.'}</span></div></div>`;
+    o += `<div class="next"><div class="empty">${svg('cal')}<b style="color:var(--ink)">Henüz etkinlik yok</b><span>${isAdmin() ? 'İlk etkinliği sen ekle.' : 'Bir etkinlik öner, yönetici onaylayınca herkese duyurulsun.'}</span></div></div>`;
   } else o += heroCard(upcoming[0]);
   if (isAdmin() && waitCount) {
     const parts = [];
-    if (pendingEvents().length) parts.push(`${pendingEvents().length} plan`);
+    if (pendingEvents().length) parts.push(`${pendingEvents().length} etkinlik`);
     if (pendingMembers().length) parts.push(`${pendingMembers().length} üye`);
     o += `<button class="banner" id="go-admin"><span class="pip"></span><span class="grow">${parts.join(' ve ')} onayını bekliyor</span><span>İncele</span></button>`;
   }
   if (pushState() !== 'granted') {
-    o += `<button class="banner" id="go-push" style="background:var(--accent-soft);border-color:transparent;color:var(--accent-ink)"><span class="pip" style="background:var(--accent)"></span><span class="grow">${pushState() === 'needs-install' ? 'Bildirim almak için Tayfa\'yı ana ekrana ekle' : 'Yeni planlardan haberdar olmak için bildirimleri aç'}</span><span>Aç</span></button>`;
+    o += `<button class="banner" id="go-push" style="background:var(--accent-soft);border-color:transparent;color:var(--accent-ink)"><span class="pip" style="background:var(--accent)"></span><span class="grow">${pushState() === 'needs-install' ? 'Bildirim almak için Tayfa\'yı ana ekrana ekle' : 'Yeni etkinliklerden haberdar olmak için bildirimleri aç'}</span><span>Aç</span></button>`;
   }
   o += turnStrip();
   o += otdCard();
@@ -863,7 +874,7 @@ function homeView() {
       <button class="btn small danger" data-withdraw="${e.id}" style="align-self:flex-start">Öneriyi geri çek</button></section>`).join('');
   }
   if (upcoming.length > 1) {
-    h += `<p class="section-title">Diğer planlar</p>`;
+    h += `<p class="section-title">Diğer etkinlikler</p>`;
     h += upcoming.slice(1).map(eventCard).join('');
   }
   return h;
@@ -897,7 +908,7 @@ function eventCard(e) {
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center">
       <button class="btn small" data-com="${e.id}">${svg('comment')}Yorumlar${S.commentCounts?.[e.id] ? ' · ' + S.commentCounts[e.id] : ''}</button>
-      ${isAdmin() ? `<button class="btn small danger" data-del="${e.id}">Planı sil</button>` : ''}
+      ${isAdmin() ? `<button class="btn small danger" data-del="${e.id}">Etkinliği sil</button>` : ''}
     </div>
   </section>`;
 }
@@ -921,14 +932,14 @@ function bindHome() {
     catch (e) { toast(errText(e)); }
   });
   $app.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => {
-    if (!confirm('Bu plan herkes için silinecek. Emin misin?')) return;
-    try { await rpc('delete_event', { p_event: b.dataset.del }); await loadData(); render(); toast('Plan silindi'); }
+    if (!confirm('Bu etkinlik herkes için silinecek. Emin misin?')) return;
+    try { await rpc('delete_event', { p_event: b.dataset.del }); await loadData(); render(); toast('Etkinlik silindi'); }
     catch (e) { toast(errText(e)); }
   });
   $app.querySelectorAll('[data-who]').forEach((b) => b.onclick = () => showWhoSheet(b.dataset.who));
   $app.querySelectorAll('[data-com]').forEach((b) => b.onclick = () => {
     const e = S.events.find((x) => x.id === b.dataset.com);
-    Anilar.showComments('event', b.dataset.com, e?.title || 'Plan', async () => { await loadData(); if (S.view === 'main' && S.tab === 'home') render(); });
+    Anilar.showComments('event', b.dataset.com, e?.title || 'Etkinlik', async () => { await loadData(); if (S.view === 'main' && S.tab === 'home') render(); });
   });
 }
 
@@ -950,13 +961,13 @@ function renderAdmin() {
     <button class="back" id="back">${svg('back')}Geri</button>
     <header><h1>Yönetim</h1><p class="sub" style="margin-top:2px">Bu ekranı sadece sen görüyorsun</p></header>
 
-    <section class="card"><div style="display:flex;justify-content:space-between;align-items:center"><h2>Onay bekleyen planlar</h2>${pe.length ? `<span class="pill" style="background:var(--accent);color:#fff">${pe.length}</span>` : ''}</div>
+    <section class="card"><div style="display:flex;justify-content:space-between;align-items:center"><h2>Onay bekleyen etkinlikler</h2>${pe.length ? `<span class="pill" style="background:var(--accent);color:#fff">${pe.length}</span>` : ''}</div>
       ${pe.length ? pe.map((e) => `<div style="display:flex;flex-direction:column;gap:10px;padding-top:4px">
         <div class="list-row">${avatar(nameOf(e.created_by), e.created_by, 'lg')}<div class="grow"><div class="name">${esc(e.title)}</div>
         <div class="small">${esc(nameOf(e.created_by))} önerdi · ${esc(fmt.short(new Date(e.starts_at)))}${e.place ? ' · ' + esc(e.place) : ''}</div></div></div>
         ${e.note ? `<p class="ev-note small" style="color:var(--ink)">${esc(e.note)}</p>` : ''}
         <div class="row2"><button class="btn primary" data-ev-ok="${e.id}">Onayla ve duyur</button><button class="btn" data-ev-no="${e.id}">Reddet</button></div></div>`).join('<hr style="border:none;border-top:1px solid var(--line);margin:4px 0">')
-      : '<p class="small">Onay bekleyen plan yok.</p>'}
+      : '<p class="small">Onay bekleyen etkinlik yok.</p>'}
     </section>
 
     <section class="card"><div style="display:flex;justify-content:space-between;align-items:center"><h2>Onay bekleyen üyeler</h2>${pm.length ? `<span class="pill" style="background:var(--accent);color:#fff">${pm.length}</span>` : ''}</div>
@@ -996,8 +1007,8 @@ function renderAdmin() {
     try { await fn(b); await loadData(); renderAdmin(); if (msg) toast(msg); }
     catch (e) { toast(errText(e)); b.disabled = false; }
   });
-  act2('[data-ev-ok]', (b) => rpc('decide_event', { p_event: b.dataset.evOk, p_ok: true }), 'Plan onaylandı, herkese duyuruldu');
-  act2('[data-ev-no]', (b) => rpc('decide_event', { p_event: b.dataset.evNo, p_ok: false }), 'Plan reddedildi', 'Bu planı reddetmek istiyor musun?');
+  act2('[data-ev-ok]', (b) => rpc('decide_event', { p_event: b.dataset.evOk, p_ok: true }), 'Etkinlik onaylandı, herkese duyuruldu');
+  act2('[data-ev-no]', (b) => rpc('decide_event', { p_event: b.dataset.evNo, p_ok: false }), 'Etkinlik reddedildi', 'Bu etkinliği reddetmek istiyor musun?');
   act2('[data-m-ok]', (b) => rpc('decide_member', { p_user: b.dataset.mOk, p_ok: true }), 'Üye onaylandı');
   act2('[data-m-no]', (b) => rpc('decide_member', { p_user: b.dataset.mNo, p_ok: false }), 'Kayıt reddedildi', 'Bu kaydı reddetmek istiyor musun?');
   act2('[data-rm]', (b) => rpc('remove_member', { p_user: b.dataset.rm }), 'Üye çıkarıldı', 'Bu kişiyi gruptan çıkarmak istiyor musun? Erişimi hemen kesilir.');
@@ -1035,7 +1046,7 @@ const sheetHead = (t) => `<div class="sheet-head"><h2 style="font-size:20px">${t
 function showEventSheet(pre = {}) {
   const d = new Date(Date.now() + 24 * 3600 * 1000); d.setMinutes(0, 0, 0); d.setHours(20);
   const local = pre.when || new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-  openSheet(`${sheetHead(isAdmin() ? 'Plan aç' : 'Plan öner')}
+  openSheet(`${sheetHead(isAdmin() ? 'Etkinlik' : 'Etkinlik öner')}
     ${isAdmin() ? '' : '<p class="info">Önerin yöneticinin onayından sonra herkese duyurulur.</p>'}
     <form id="ev-form" style="display:flex;flex-direction:column;gap:14px" novalidate>
       ${field('ev-title', 'Ne yapıyoruz?', 'text', 'Halı saha, kahvaltı, mangal…', 'maxlength="80"', pre.title || '')}
@@ -1044,7 +1055,7 @@ function showEventSheet(pre = {}) {
       <button type="button" class="btn block" id="ev-loc">${svg('pin')}${pre.lat != null ? 'Konum seçildi · değiştir' : 'Haritada konum seç (hava durumu için)'}</button>
       <div class="field"><label for="f-ev-note">Not (isteğe bağlı)</label><textarea class="input" id="f-ev-note" maxlength="500" placeholder="Topu getiren, saat değişikliği…">${esc(pre.note || '')}</textarea></div>
       <p class="err" id="ev-err"></p>
-      <button class="btn primary block" style="height:52px" type="submit" id="ev-btn">${isAdmin() ? 'Planı aç ve duyur' : 'Öneriyi gönder'}</button>
+      <button class="btn primary block" style="height:52px" type="submit" id="ev-btn">${isAdmin() ? 'Ekle ve duyur' : 'Öneriyi gönder'}</button>
     </form>`, () => {
     const grab = () => ({ ...pre, title: val('ev-title'), when: document.getElementById('f-ev-when').value, place: val('ev-place'), note: document.getElementById('f-ev-note').value });
     document.getElementById('ev-loc').onclick = () => {
@@ -1058,7 +1069,7 @@ function showEventSheet(pre = {}) {
       ev.preventDefault();
       const err = document.getElementById('ev-err'); const btn = document.getElementById('ev-btn');
       const title = val('ev-title'); const when = document.getElementById('f-ev-when').value;
-      if (!title) return (err.textContent = 'Planın adını yaz.');
+      if (!title) return (err.textContent = 'Etkinliğin adını yaz.');
       if (!when) return (err.textContent = 'Tarih ve saat seç.');
       btn.disabled = true;
       try {
@@ -1066,7 +1077,7 @@ function showEventSheet(pre = {}) {
         if (pre.lat != null) Object.assign(args, { p_lat: pre.lat, p_lng: pre.lng });
         await rpc('propose_event', args);
         closeSheet(); await loadData(); render();
-        toast(isAdmin() ? 'Plan açıldı, herkese duyuruldu' : 'Önerin yöneticiye gönderildi');
+        toast(isAdmin() ? 'Etkinlik eklendi, herkese duyuruldu' : 'Önerin yöneticiye gönderildi');
       } catch (e) { err.textContent = errText(e); btn.disabled = false; }
     };
   });
@@ -1086,8 +1097,8 @@ function showWhoSheet(eid) {
 function showNotifySheet() {
   const st = pushState();
   const text = {
-    granted: 'Bildirimler bu cihazda açık. Yeni planlar ve onaylar sana bildirim olarak gelir.',
-    default: 'Bildirimleri açarsan yeni planlar, onaylar ve hatırlatmalar telefonuna gelir.',
+    granted: 'Bildirimler bu cihazda açık. Yeni etkinlikler ve onaylar sana bildirim olarak gelir.',
+    default: 'Bildirimleri açarsan yeni etkinlikler, onaylar ve hatırlatmalar telefonuna gelir.',
     denied: 'Bildirimler telefon ayarlarından kapatılmış. Ayarlar > Bildirimler > Tayfa bölümünden açabilirsin.',
     'needs-install': 'iPhone\'da bildirim alabilmek için Tayfa\'yı önce ana ekrana eklemelisin.',
     unsupported: 'Bu tarayıcı bildirimleri desteklemiyor. iPhone\'da Safari, Android\'de Chrome kullan.',
@@ -1099,7 +1110,7 @@ function showNotifySheet() {
     <p class="section-title">Sohbet bildirimleri</p>
     <div class="seg3">${[['all', 'Tümü'], ['mentions', 'Bahsedilince'], ['off', 'Kapalı']].map(([k, l]) =>
       `<button data-cn="${k}" class="${(S.members.find((m) => m.user_id === me())?.chat_notify || 'all') === k ? 'on' : ''}">${l}</button>`).join('')}</div>
-    <p class="small">Planlar, onaylar ve oyun sırası bildirimleri bu ayardan etkilenmez.</p>`, () => {
+    <p class="small">Etkinlikler, onaylar ve oyun sırası bildirimleri bu ayardan etkilenmez.</p>`, () => {
     document.querySelectorAll('[data-cn]').forEach((b) => b.onclick = async () => {
       try {
         await rpc('set_chat_notify', { p_mode: b.dataset.cn });

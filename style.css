@@ -680,3 +680,12 @@ html, body { overflow-x: hidden; }
 .mid-dice.big .die3 { width: 30px; height: 30px; }
 .board .mid { height: 38px; }
 .ck.ghost { pointer-events: none; border-radius: 50%; }
+
+/* sohbet: yeni fotoğraf kartı */
+.sys-phs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; margin-top: 8px; }
+.sys-phs.n1 { grid-template-columns: 1fr; } .sys-phs.n2 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .sys-phs.n3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.sys-ph { aspect-ratio: 1; border: none; border-radius: 10px; background: #D9D2C8 center/cover; padding: 0; position: relative; overflow: hidden; }
+.sys-phs.n1 .sys-ph { aspect-ratio: 4 / 3; }
+.sys-ph b { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.45); color: #FFF; font-size: 17px; }
+.link-btn { border: none; background: none; color: var(--accent); font-weight: 700; font-size: 13px; padding: 8px 0 0; display: inline-flex; align-items: center; gap: 2px; }
+.link-btn svg { width: 15px; height: 15px; }

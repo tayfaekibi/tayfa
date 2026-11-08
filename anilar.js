@@ -340,6 +340,30 @@ function albumMenu() {
 }
 
 // ------------------------------------------------------------------ fotoğraf görüntüleyici (indirme yok)
+const dateYear = (d) => new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' }).format(d);
+
+// Yeni yüklenen fotoğrafları doğrudan tam ekran aç (bildirim ya da sohbet kartından)
+export async function openNew({ album, count, ts, ids, start = 0 }) {
+  try {
+    let list = [];
+    if (ids?.length) {
+      const r = await sb.from('photos').select('*').in('id', ids);
+      list = (r.data || []).sort((x, y) => ids.indexOf(x.id) - ids.indexOf(y.id));
+    }
+    if (!list.length && album) {
+      let q = sb.from('photos').select('*').eq('album_id', album).order('created_at', { ascending: false }).limit(Math.min(+count || 12, 60));
+      if (ts) q = q.lte('created_at', new Date((+ts + 5) * 1000).toISOString());
+      const r = await q;
+      list = (r.data || []).reverse();
+    }
+    if (!list.length) { toast('Fotoğraflar bulunamadı, silinmiş olabilir'); return; }
+    A.photos = list;
+    const l = await sb.from('photo_likes').select('*').in('photo_id', list.map((p) => p.id));
+    A.likes = l.data || [];
+    openViewer(Math.min(start, list.length - 1), () => {});
+  } catch (e) { toast(errText(e)); }
+}
+
 function openViewer(start, onClose) {
   let i = start;
   const root = document.getElementById('sheet-root');
@@ -357,7 +381,7 @@ function openViewer(start, onClose) {
       <div class="viewer-stage" id="v-stage"><div class="viewer-img nosave" style="background-image:url('${url(p.path)}')"></div><div class="viewer-shield"></div></div>
       <div class="viewer-bottom">
         <button class="like-btn ${liked ? 'on' : ''}" id="v-like">${svg('heart')}<span>${n || ''}</span></button>
-        <span class="small" style="color:#CFC6BF">${p.taken_at ? esc(fmt.short(new Date(p.taken_at))) : ''}</span>
+        <span class="small" style="color:#CFC6BF">${p.taken_at ? esc(dateYear(new Date(p.taken_at))) : ''}</span>
       </div></div>`;
     const close = () => { root.innerHTML = ''; if (onClose) onClose(); else drawAlbum(); };
     document.getElementById('v-close').onclick = close;

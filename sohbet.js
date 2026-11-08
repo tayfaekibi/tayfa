@@ -3,6 +3,7 @@ import {
   sb, S, esc, svg, avatar, toast, errText, rpc, fmt, openSheet, closeSheet, sheetHead,
   isAdmin, me, nameOf, activeMembers, header, bindHeader, route, updateTabDots, loadData, render,
 } from './app.js';
+import * as Anilar from './anilar.js';
 import * as E from './e2e.js';
 
 const C = {
@@ -67,7 +68,7 @@ function muteSheet() {
         <span class="switch"><input type="checkbox" id="mu-on" ${muted ? 'checked' : ''}><i></i></span></label>
       <label class="sw-row ${muted ? '' : 'off'}" for="mu-men"><span class="grow"><b>Benden bahsedilince yine bildir</b><span>@adın yazılınca ya da mesajına yanıt verilince</span></span>
         <span class="switch"><input type="checkbox" id="mu-men" ${men ? 'checked' : ''} ${muted ? '' : 'disabled'}><i></i></span></label>
-      <p class="small">Bu ayar sadece genel sohbet içindir. Plan, onay ve oyun bildirimleri gelmeye devam eder.</p>`;
+      <p class="small">Bu ayar sadece genel sohbet içindir. Etkinlik, onay ve oyun bildirimleri gelmeye devam eder.</p>`;
   };
   const save = async () => {
     try { await rpc('set_chat_mute', { p_muted: !!m.chat_muted, p_mentions: m.chat_mute_mentions !== false }); }
@@ -237,14 +238,19 @@ function systemCard(m) {
   const p = m.payload || {};
   if (p.type === 'event') {
     const mine = S.rsvps?.find((r) => r.event_id === p.event_id && r.user_id === me())?.answer;
-    return `<div class="sys-card"><span class="sys-k">YENİ PLAN</span>
+    return `<div class="sys-card"><span class="sys-k">YENİ ETKİNLİK</span>
       <div class="sys-row"><div><b>${esc(p.title)}</b><div class="small">${esc(fmt.short(new Date(p.starts_at)))}${p.place ? ' · ' + esc(p.place) : ''}</div></div>
       ${mine === 'yes' ? '<span class="small" style="color:var(--ok);font-weight:700">✓ Geliyorsun</span>'
         : `<button class="btn small primary" data-sys-rsvp="${p.event_id}">Geliyorum</button>`}</div></div>`;
   }
   if (p.type === 'album') {
-    return `<div class="sys-card"><div class="sys-row">${svg('img')}<span style="flex:1">${p.loose ? `${p.count} yeni fotoğraf eklendi` : `<b>${esc(p.title)}</b> albümüne ${p.count} fotoğraf eklendi`}</span>
-      <button class="btn small" data-sys-album="${p.album_id}">Gör</button></div></div>`;
+    const n = +p.count || 0;
+    const th = (p.thumbs || []).slice(0, 4);
+    const tiles = th.length ? th.map((t, i) => `<button class="sys-ph nosave" data-sys-ph="${m.id}" data-i="${i}" data-th="${esc(t)}" aria-label="Fotoğraf ${i + 1}">${i === 3 && n > 4 ? `<b>+${n - 3}</b>` : ''}</button>`).join('')
+      : `<button class="btn small" data-sys-ph="${m.id}" data-i="0">${svg('img')}Fotoğrafları aç</button>`;
+    return `<div class="sys-card"><div class="sys-row">${svg('img')}<span style="flex:1">${p.loose ? `${n} yeni fotoğraf eklendi` : `<b>${esc(p.title)}</b> albümüne ${n} fotoğraf eklendi`}</span></div>
+      <div class="sys-phs ${th.length ? 'n' + th.length : ''}">${tiles}</div>
+      ${p.loose ? '' : `<button class="link-btn" data-sys-album="${p.album_id}">Albüme git ${svg('chev')}</button>`}</div>`;
   }
   if (p.type === 'game') {
     return `<div class="sys-card"><div class="sys-row">${svg('trophy')}<span style="flex:1">${esc(p.text)}</span></div></div>`;
@@ -334,6 +340,12 @@ function bindList(l) {
     catch (e) { toast(errText(e)); }
   });
   l.querySelectorAll('[data-sys-album]').forEach((b) => b.onclick = () => route('#album/' + b.dataset.sysAlbum));
+  l.querySelectorAll('[data-sys-ph]').forEach((b) => b.onclick = () => {
+    const m = C.list.find((x) => x.id === b.dataset.sysPh); const p = m?.payload || {};
+    Anilar.openNew({ ids: p.photos, album: p.album_id, count: p.count, ts: p.ts, start: +b.dataset.i || 0 });
+  });
+  const ths = [...l.querySelectorAll('[data-th]')].filter((b) => !b.style.backgroundImage);
+  if (ths.length) Anilar.thumbUrls(ths.map((b) => b.dataset.th)).then((url) => ths.forEach((b) => { b.style.backgroundImage = `url('${url(b.dataset.th)}')`; })).catch(() => {});
 }
 
 function drawTyping() {
