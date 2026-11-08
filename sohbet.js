@@ -246,10 +246,11 @@ function systemCard(m) {
   if (p.type === 'album') {
     const n = +p.count || 0;
     const th = (p.thumbs || []).slice(0, 4);
-    const tiles = th.length ? th.map((t, i) => `<button class="sys-ph nosave" data-sys-ph="${m.id}" data-i="${i}" data-th="${esc(t)}" aria-label="Fotoğraf ${i + 1}">${i === 3 && n > 4 ? `<b>+${n - 3}</b>` : ''}</button>`).join('')
-      : `<button class="btn small" data-sys-ph="${m.id}" data-i="0">${svg('img')}Fotoğrafları aç</button>`;
+    // Eski kartlarda küçük resim kayıtlı değil: yer tutucu koy, resimleri sonradan albümden bul
+    const k = th.length || Math.min(Math.max(n, 1), 4);
+    const tiles = Array.from({ length: k }, (_, i) => `<button class="sys-ph nosave" data-sys-ph="${m.id}" data-i="${i}" ${th[i] ? `data-th="${esc(th[i])}"` : 'data-old="1"'} aria-label="Fotoğraf ${i + 1}">${i === 3 && n > 4 ? `<b>+${n - 3}</b>` : ''}</button>`).join('');
     return `<div class="sys-card"><div class="sys-row">${svg('img')}<span style="flex:1">${p.loose ? `${n} yeni fotoğraf eklendi` : `<b>${esc(p.title)}</b> albümüne ${n} fotoğraf eklendi`}</span></div>
-      <div class="sys-phs ${th.length ? 'n' + th.length : ''}">${tiles}</div>
+      <div class="sys-phs n${k}">${tiles}</div>
       ${p.loose ? '' : `<button class="link-btn" data-sys-album="${p.album_id}">Albüme git ${svg('chev')}</button>`}</div>`;
   }
   if (p.type === 'game') {
@@ -343,6 +344,25 @@ function bindList(l) {
   l.querySelectorAll('[data-sys-ph]').forEach((b) => b.onclick = () => {
     const m = C.list.find((x) => x.id === b.dataset.sysPh); const p = m?.payload || {};
     Anilar.openNew({ ids: p.photos, album: p.album_id, count: p.count, ts: p.ts, start: +b.dataset.i || 0 });
+  });
+  // Eski fotoğraf kartları: yükleme anına kadarki son fotoğrafları bul
+  const olds = [...new Set([...l.querySelectorAll('[data-old]')].map((b) => b.dataset.sysPh))];
+  olds.forEach(async (mid) => {
+    const m = C.list.find((x) => x.id === mid); const p = m?.payload; if (!p || p._loading) return;
+    p._loading = true;
+    try {
+      const until = new Date(new Date(m.created_at).getTime() + 2 * 60000).toISOString();
+      const r = await sb.from('photos').select('id, thumb_path').eq('album_id', p.album_id).lte('created_at', until)
+        .order('created_at', { ascending: false }).limit(Math.min(+p.count || 4, 24));
+      const list = (r.data || []).reverse();
+      if (!list.length) return;
+      p.photos = list.map((x) => x.id); p.thumbs = list.slice(0, 4).map((x) => x.thumb_path);
+      const url = await Anilar.thumbUrls(p.thumbs);
+      document.querySelectorAll(`[data-sys-ph="${mid}"][data-old]`).forEach((b) => {
+        const t = p.thumbs[+b.dataset.i];
+        if (t) { b.dataset.th = t; b.style.backgroundImage = `url('${url(t)}')`; b.removeAttribute('data-old'); }
+      });
+    } catch (_) { /* */ }
   });
   const ths = [...l.querySelectorAll('[data-th]')].filter((b) => !b.style.backgroundImage);
   if (ths.length) Anilar.thumbUrls(ths.map((b) => b.dataset.th)).then((url) => ths.forEach((b) => { b.style.backgroundImage = `url('${url(b.dataset.th)}')`; })).catch(() => {});
