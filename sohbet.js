@@ -136,7 +136,10 @@ export function unmount() {
 // Klavye açılınca iPhone sayfayı yukarı kaydırıyor; sohbeti görünen alana (klavyenin üstüne) oturt
 function onVV() {
   const vv = window.visualViewport; if (!vv) return;
-  const open = window.innerHeight - vv.height > 120;
+  // Klavye sadece bir yazı kutusu odaktayken açık sayılır (yakınlaştırma ya da eski değer yanıltmasın)
+  const ae = document.activeElement;
+  const typing = !!ae && (ae.tagName === 'TEXTAREA' || (ae.tagName === 'INPUT' && !['checkbox', 'radio', 'button'].includes(ae.type)));
+  const open = typing && (vv.scale || 1) <= 1.05 && window.innerHeight - vv.height > 120;
   const was = document.body.classList.contains('kb-open');
   const r = document.documentElement.style;
   r.setProperty('--vvt', vv.offsetTop + 'px');
@@ -152,6 +155,8 @@ if (window.visualViewport) {
   window.visualViewport.addEventListener('resize', onVV);
   window.visualViewport.addEventListener('scroll', onVV);
 }
+document.addEventListener('focusout', () => setTimeout(onVV, 50));
+document.addEventListener('focusin', () => setTimeout(onVV, 50));
 function fitViewport() { onVV(); }
 
 // ------------------------------------------------------------------ veri
@@ -781,8 +786,9 @@ async function postGame({ text, blob, dur }) {
 export function openGameChat(game) {
   if (!game.players.includes(me())) return;
   const opp = game.players.find((u) => u !== me());
-  openSheet(`${sheetHead(`${esc(nameOf(opp))} ile sohbet`)}
-    <span class="e2e-line" style="margin-top:-8px">${svg('lock')}Uçtan uca şifreli · sadece siz ikiniz görürsünüz</span>
+  const many = game.players.length > 2;
+  openSheet(`${sheetHead(many ? 'Masa sohbeti' : `${esc(nameOf(opp))} ile sohbet`)}
+    <span class="e2e-line" style="margin-top:-8px">${svg('lock')}Uçtan uca şifreli · ${many ? 'sadece masadakiler görür' : 'sadece siz ikiniz görürsünüz'}</span>
     <div class="gc-list chat-list" id="gc-list"></div>
     <div class="mention-bar">${QUICK.map((q) => `<button data-q="${esc(q)}">${esc(q)}</button>`).join('')}</div>
     <div class="composer-row">
@@ -791,6 +797,7 @@ export function openGameChat(game) {
       <button class="round-btn" id="gc-btn" aria-label="Sesli mesaj için basılı tut">${svg('mic')}</button>
     </div>
     <div class="rec-bar hidden" id="rec-bar"><span class="rec-dot"></span><span id="rec-time">0:00</span><span class="grow small" style="color:var(--sub)">Bırakınca gider · iptal için yukarı kaydır</span></div>`, () => {
+    document.querySelector('.sheet')?.classList.add('gc-sheet'); // yazma kutusu hep görünsün
     drawGC(true); markGCSeen();
     const inp = document.getElementById('gc-in'); const btn = document.getElementById('gc-btn');
     const setBtn = () => { const has = inp.value.trim().length > 0; btn.innerHTML = svg(has ? 'send' : 'mic'); btn.classList.toggle('send', has); };

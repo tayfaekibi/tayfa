@@ -735,3 +735,8 @@ body.recording .round-btn.armed, body.recording .round-btn.armed * { pointer-eve
 .treat-tag { position: absolute; top: -10px; right: -6px; display: inline-flex; align-items: center; gap: 3px; background: #FFF; color: #16222E; border-radius: 12px; padding: 2px 7px 2px 4px; font-size: 11px; font-weight: 700; box-shadow: 0 2px 8px rgba(0,0,0,.25); animation: drop .25s ease; white-space: nowrap; z-index: 3; }
 .treat-tag b { font-size: 16px; }
 .k-me { position: relative; }
+
+/* oyun sohbeti penceresi: yazma kutusu hep görünür */
+.sheet.gc-sheet { display: flex; flex-direction: column; overflow: hidden; height: min(80vh, 640px); }
+.sheet.gc-sheet .gc-list { flex: 1 1 auto; max-height: none; min-height: 60px; overflow-y: auto; }
+body.kb-open .sheet.gc-sheet { height: calc(var(--vvh, 100vh) - 16px); }

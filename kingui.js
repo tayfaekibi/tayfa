@@ -3,7 +3,7 @@ import { sb, S, esc, svg, avatar, toast, errText, openSheet, closeSheet, sheetHe
 import * as K from './supabase/functions/_shared/king.js';
 import * as Voice from './voice.js';
 
-const KU = { hand: [], gameId: null, sel: null, busy: false, pickType: null };
+const KU = { hand: [], gameId: null, sel: null, busy: false, pickType: null, pending: null };
 
 export async function loadHand(game) {
   if (!game.players.includes(me())) { KU.hand = []; return; }
@@ -37,6 +37,13 @@ function healHand(game, box, call) {
 }
 
 export function draw(game, box, call) {
+  // Oynadığım kart sunucudan onay gelene kadar masada görünsün
+  if (KU.pending && KU.pending.game === game.id && game.state.phase === 'play'
+      && !game.state.trick.some((t) => t.card === KU.pending.card)
+      && !(game.state.lastTrick?.cards || []).some((t) => t.card === KU.pending.card)) {
+    const s0 = game.state; const counts = [...s0.counts]; counts[KU.pending.seat] = Math.max(0, counts[KU.pending.seat] - 1);
+    game = { ...game, state: { ...s0, trick: [...s0.trick, { seat: KU.pending.seat, card: KU.pending.card }], counts, turn: (KU.pending.seat + 1) % 4 } };
+  }
   const st = game.state;
   const mine = Math.max(0, game.players.indexOf(me()));
   const playing = game.players.includes(me());
@@ -109,26 +116,28 @@ export function draw(game, box, call) {
     ${playing && game.status === 'active' ? `<div class="k-me">${avatar(nameOf(me()), me())}<div class="grow"><b>Sen · ${st.score[mine]}</b>
       <span class="small">${st.phase === 'play' ? `Bu el: ${st.tricksBy?.[mine] || 0} el · ${st.handPts[mine] > 0 ? '+' : ''}${st.handPts[mine]}` : `${st.hand}. el / 20`}</span></div>
       <button class="btn small" id="k-table">Puanlar</button>
-      ${myTurn && st.phase === 'play' ? `<button class="btn primary" id="k-play" ${KU.sel && !KU.busy ? '' : 'disabled'}>Oyna</button>` : ''}</div>` : ''}
+      </div>` : ''}
     ${game.status === 'active' && !playing ? '<button class="btn block" id="k-table">Puan tablosu</button>' : ''}
     ${playing ? '<div id="g-chatbar"></div>' : ''}`;
 
   const doPlay = async (c) => {
     if (KU.busy) return;
     KU.busy = true; KU.sel = null;
-    const guard = setTimeout(() => { if (KU.busy) { KU.busy = false; loadHand(game).then(() => draw(game, box, call)); } }, 12000);
+    const guard = setTimeout(() => { if (KU.busy) { KU.busy = false; KU.pending = null; loadHand(game).then(() => draw(game, box, call)); } }, 16000);
     const prev = KU.hand; KU.hand = KU.hand.filter((x) => x !== c); // hemen elden çıkar
+    // Kartı sunucu cevabını beklemeden masaya koy
+    KU.pending = { game: game.id, seat: mine, card: c };
     draw(game, box, call);
     const ok = await call('play', { card: c });
     clearTimeout(guard);
+    KU.pending = null;
     KU.busy = false;
     if (!ok) { KU.hand = prev; draw(game, box, call); }
   };
   box.querySelectorAll('[data-kc]').forEach((el) => el.onclick = () => {
     const c = el.dataset.kc;
     if (!legal.includes(c)) { if (myTurn && st.phase === 'play') toast('Bu kartı şimdi oynayamazsın'); return; }
-    if (KU.sel === c) return doPlay(c);
-    KU.sel = c; draw(game, box, call);
+    doPlay(c); // tek dokunuşla oyna
   });
   document.getElementById('k-play')?.addEventListener('click', () => KU.sel && doPlay(KU.sel));
   box.querySelectorAll('[data-ct]').forEach((b) => b.onclick = async () => {
