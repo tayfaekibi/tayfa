@@ -562,7 +562,7 @@ function bindRecorder(btn, canRecord, onDone = sendVoice) {
     setTimeout(() => document.body.classList.remove('recording'), 450); // parmağı kaldırınca altta kalana dokunulmuş sayılmasın
   };
   const stop = (send) => {
-    if (!rec) { endUi(); return; }
+    if (!rec) { if (btn.classList.contains('armed')) endUi(); return; } // kayıt hiç başlamadıysa (ör. Gönder) dokunma
     cancelled = !send;
     clearInterval(timer);
     try { rec.stop(); } catch (_) { /* */ }
@@ -606,8 +606,8 @@ function bindRecorder(btn, canRecord, onDone = sendVoice) {
     try { btn.setPointerCapture(e.pointerId); } catch (_) { /* */ }
   });
   btn.addEventListener('pointermove', (e) => { if (rec && y0 - e.clientY > 80) { stop(false); toast('Kayıt iptal edildi'); } });
-  btn.addEventListener('pointerup', () => { pressed = false; stop(true); });
-  btn.addEventListener('pointercancel', () => { pressed = false; stop(false); });
+  btn.addEventListener('pointerup', () => { if (!pressed) return; pressed = false; stop(true); });
+  btn.addEventListener('pointercancel', () => { if (!pressed) return; pressed = false; stop(false); });
 }
 
 async function sendVoice(blob, dur) {
