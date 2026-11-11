@@ -48,6 +48,8 @@ export function tabView() {
       <div id="mention-bar" class="mention-bar"></div>
       <div class="composer-row">
         <label class="hidden" for="msg-in">Mesaj</label>
+        <button class="round-btn ghost snap-btn" id="snap-btn" aria-label="Anlık foto gönder">${svg('camera')}</button>
+        <input type="file" id="snap-file" accept="image/*" class="hidden">
         <textarea id="msg-in" rows="1" maxlength="2000" placeholder="Mesaj yaz, @ ile birini çağır"></textarea>
         <button class="round-btn" id="send-btn" aria-label="Sesli mesaj için basılı tut">${svg('mic')}</button>
       </div>
@@ -173,6 +175,8 @@ async function loadMessages() {
   ]);
   C.reactions = r.data || [];
   C.reads = rd.data || [];
+  await loadSnapViews();
+  cleanSnaps();
 }
 
 async function decrypt(m) {
@@ -214,6 +218,11 @@ function subscribe() {
       C.typing.delete(m.sender);
       drawList(nearBottom()); drawTyping();
       if (document.visibilityState === 'visible') markRead();
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'snap_views' }, async () => { await loadSnapViews(); drawList(false); })
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: `group_id=eq.${S.ctx.group_id}` }, ({ new: m }) => {
+      const i = C.list.findIndex((x) => x.id === m.id); if (i < 0) return;
+      C.list[i] = { ...C.list[i], ...m }; drawList(false);
     })
     .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, ({ old }) => {
       C.list = C.list.filter((x) => x.id !== old.id); drawList(false);
@@ -302,6 +311,7 @@ function bubble(m, isMyLast) {
   let body;
   if (p.err === 'locked') body = `<span class="locked">${svg('lock')}Bu mesaj, bu cihaz kaydedilmeden önce gönderilmiş.</span>`;
   else if (p.err) body = `<span class="locked">${svg('lock')}Mesaj çözülemedi.</span>`;
+  else if (m.kind === 'snap') body = snapBody(m);
   else if (m.kind === 'voice') body = `<div class="voice" data-voice="${m.id}"><button class="voice-play" aria-label="Oynat">${svg('play')}</button>
       <div class="voice-bar"><i></i></div><span class="voice-t">${fmtDur(m.duration_ms)}</span><button class="voice-speed" aria-label="Hız">1x</button></div>`;
   else body = `<div class="msg-text">${linkify(esc(p.t || ''))}</div>`;
@@ -309,7 +319,7 @@ function bubble(m, isMyLast) {
   if (m.reply_to) {
     const q = C.list.find((x) => x.id === m.reply_to);
     const qp = q ? C.plain.get(q.id) : null;
-    const qt = !q ? 'Silinmiş mesaj' : q.kind === 'voice' ? '🎤 Sesli mesaj' : qp?.t ? qp.t.slice(0, 90) : '🔒';
+    const qt = !q ? 'Silinmiş mesaj' : q.kind === 'voice' ? '🎤 Sesli mesaj' : q.kind === 'snap' ? '📸 Anlık foto' : qp?.t ? qp.t.slice(0, 90) : '🔒';
     quote = `<div class="quote"><b>${esc(q ? nameOf(q.sender) : '')}</b>${esc(qt)}</div>`;
   }
   const rs = C.reactions.filter((r) => r.message_id === m.id);
@@ -372,6 +382,7 @@ function bindList(l) {
     el.addEventListener('contextmenu', (e) => { e.preventDefault(); msgMenu(el.dataset.msg); });
   });
   l.querySelectorAll('[data-voice]').forEach((el) => bindVoice(el));
+  l.querySelectorAll('[data-snap]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); openSnap(b.dataset.snap); });
   l.querySelectorAll('[data-msg] [data-rx]').forEach((b) => b.onclick = (e) => {
     e.stopPropagation(); const id = b.closest('[data-msg]').dataset.msg;
     const myR = C.reactions.find((r) => r.message_id === id && r.user_id === me())?.emoji;
@@ -437,7 +448,7 @@ function drawPin() {
   const el = document.getElementById('pin-bar'); if (!el) return;
   if (!C.pin) { el.innerHTML = ''; return; }
   const m = C.pin.m; const p = C.plain.get(m.id) || {};
-  const t = m.kind === 'voice' ? '🎤 Sesli mesaj' : p.t || '🔒 Şifreli mesaj';
+  const t = m.kind === 'voice' ? '🎤 Sesli mesaj' : m.kind === 'snap' ? '📸 Anlık foto' : p.t || '🔒 Şifreli mesaj';
   el.innerHTML = `<span class="ic">${svg('pinIt')}</span><span class="grow"><small>SABİT MESAJ · ${esc(nameOf(m.sender))}</small><span class="t">${esc(t)}</span></span>`;
   el.onclick = () => {
     const row = document.querySelector(`[data-msg="${m.id}"]`);
@@ -489,7 +500,7 @@ function drawReply() {
   if (!C.replyTo) { el.innerHTML = ''; return; }
   const q = C.list.find((x) => x.id === C.replyTo); const qp = q && C.plain.get(q.id);
   el.innerHTML = `<div class="reply-bar">${svg('reply', 'style="width:16px;height:16px;color:var(--accent);flex-shrink:0"')}<div style="flex:1;min-width:0"><b>Yanıtlanıyor: ${esc(q?.sender === me() ? 'kendi mesajın' : nameOf(q?.sender))}</b>
-    <span>${esc(q?.kind === 'voice' ? '🎤 Sesli mesaj' : (qp?.t || '').slice(0, 80))}</span></div>
+    <span>${esc(q?.kind === 'voice' ? '🎤 Sesli mesaj' : q?.kind === 'snap' ? '📸 Anlık foto' : (qp?.t || '').slice(0, 80))}</span></div>
     <button class="icon-btn" style="width:34px;height:34px;border:none" id="reply-x" aria-label="Yanıtı iptal et">${svg('x')}</button></div>`;
   document.getElementById('reply-x').onclick = () => { C.replyTo = null; drawReply(); };
 }
@@ -497,6 +508,9 @@ function drawReply() {
 // ------------------------------------------------------------------ yazma ve gönderme
 let typingSent = 0;
 function bindComposer() {
+  const sf = document.getElementById('snap-file');
+  document.getElementById('snap-btn').onclick = () => { sf.value = ''; sf.click(); };
+  sf.onchange = () => { const f = sf.files?.[0]; if (f) snapPreview(f); };
   const inp = document.getElementById('msg-in');
   const btn = document.getElementById('send-btn');
   if (!inp) return;
@@ -864,4 +878,112 @@ export function openGameChat(game) {
       try { await postGame({ blob, dur }); } catch (e) { toast('Sesli mesaj gönderilemedi: ' + errText(e)); }
     });
   });
+}
+
+// ================================================================== anlık foto
+const SNAP_SECS = 10, SNAP_TTL = 24 * 3600 * 1000;
+C.snapViews = new Map();
+async function loadSnapViews() {
+  const ids = C.list.filter((m) => m.kind === 'snap').map((m) => m.id);
+  C.snapViews = new Map();
+  if (!ids.length) return;
+  const { data } = await sb.from('snap_views').select('message_id, user_id').in('message_id', ids);
+  (data || []).forEach((v) => { if (!C.snapViews.has(v.message_id)) C.snapViews.set(v.message_id, []); C.snapViews.get(v.message_id).push(v.user_id); });
+}
+const snapOthers = (m) => activeMembers().filter((x) => x.user_id !== m.sender).length;
+function snapBody(m) {
+  const views = C.snapViews.get(m.id) || [];
+  const gone = !m.audio_path || Date.now() - new Date(m.created_at).getTime() > SNAP_TTL;
+  const total = snapOthers(m);
+  let sub, cls = '', btn = false;
+  if (m.sender === me()) {
+    sub = gone ? (views.length >= total ? 'Herkes açtı · silindi' : `Süresi doldu · ${views.length}/${total} açtı`) : `👁 ${views.length}/${total} açtı`;
+    cls = 'done';
+  } else if (views.includes(me())) { sub = 'Açıldı ✓'; cls = 'done'; }
+  else if (gone) { sub = 'Süresi doldu'; cls = 'done'; }
+  else { sub = `Açmak için dokun · ${SNAP_SECS} sn`; btn = true; }
+  return `<${btn ? `button data-snap="${m.id}"` : 'div'} class="snap-card ${cls}"><span class="snap-ic">${svg('camera')}</span>
+    <span class="grow"><b>Anlık foto</b><small>${sub}</small></span></${btn ? 'button' : 'div'}>`;
+}
+async function shrinkImage(file) {
+  const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }).catch(() => null);
+  const img = bmp || await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = URL.createObjectURL(file); });
+  const w0 = img.width, h0 = img.height, k = Math.min(1, 1600 / Math.max(w0, h0));
+  const c = document.createElement('canvas'); c.width = Math.round(w0 * k); c.height = Math.round(h0 * k);
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  return await new Promise((res) => c.toBlob(res, 'image/jpeg', 0.82));
+}
+function snapPreview(file) {
+  const url = URL.createObjectURL(file);
+  openSheet(`${sheetHead('Anlık foto')}
+    <img src="${url}" class="snap-prev nosave" alt="">
+    <p class="small" style="margin:8px 0 12px">Herkes bir kere, ${SNAP_SECS} saniye görebilir. Herkes açınca ya da 24 saat dolunca silinir.</p>
+    <button class="btn block" id="snap-send">${svg('send')} Gönder</button>`);
+  document.getElementById('snap-send').onclick = async (e) => {
+    e.target.disabled = true; e.target.textContent = 'Gönderiliyor…';
+    try { await sendSnap(file); closeSheet(); } catch (er) { toast('Gönderilemedi: ' + errText(er)); e.target.disabled = false; e.target.textContent = 'Gönder'; }
+    URL.revokeObjectURL(url);
+  };
+}
+async function sendSnap(file) {
+  const blob = await shrinkImage(file);
+  const devs = await groupDevices();
+  const s = await E.seal(E.enc({ mime: 'image/jpeg' }), devs);
+  const enc = await E.encBytes(s.msgKey, new Uint8Array(await blob.arrayBuffer()));
+  const path = `${S.ctx.group_id}/${me()}/${crypto.randomUUID()}.bin`;
+  const up = await sb.storage.from('chat').upload(path, new Blob([enc.data], { type: 'application/octet-stream' }), { contentType: 'application/octet-stream' });
+  if (up.error) throw up.error;
+  const row = { group_id: S.ctx.group_id, sender: me(), kind: 'snap', iv: s.iv, ciphertext: s.ciphertext, epk: s.epk, keys: s.keys,
+    audio_path: path, audio_iv: enc.iv, mentions: [] };
+  const { data, error } = await sb.from('messages').insert(row).select().single();
+  if (error) { sb.storage.from('chat').remove([path]).catch(() => {}); throw error; }
+  C.plain.set(data.id, { mime: 'image/jpeg' }); C.keys.set(data.id, s.msgKey);
+  if (!C.list.some((x) => x.id === data.id)) C.list.push(data);
+  drawList(true);
+}
+let snapOpen = false;
+async function openSnap(id) {
+  if (snapOpen) return;
+  const m = C.list.find((x) => x.id === id); if (!m) return;
+  const key = C.keys.get(id);
+  if (!key) { toast('Bu anlık foto bu cihazda açılamıyor'); return; }
+  snapOpen = true;
+  const ov = document.createElement('div'); ov.className = 'snap-view';
+  ov.innerHTML = '<div class="snap-load">Açılıyor…</div>';
+  document.body.appendChild(ov);
+  let url = null, timer = null;
+  const close = () => {
+    clearInterval(timer); ov.remove(); if (url) URL.revokeObjectURL(url); snapOpen = false;
+    if (!C.snapViews.get(id)?.includes(me())) { C.snapViews.set(id, [...(C.snapViews.get(id) || []), me()]); }
+    drawList(false); finishSnap(id);
+  };
+  try {
+    // Önce indir ve çöz; sonra "açtım" yaz (ağ hatasında hakkın yanmasın)
+    const { data, error } = await sb.storage.from('chat').download(m.audio_path);
+    if (error) throw error;
+    const bytes = await E.decBytes(key, m.audio_iv, new Uint8Array(await data.arrayBuffer()));
+    const ok = await rpc('open_snap', { p_message: id });
+    if (!ok) { ov.remove(); snapOpen = false; toast('Bu anlık foto artık açılamaz'); await loadSnapViews(); drawList(false); return; }
+    url = URL.createObjectURL(new Blob([bytes], { type: 'image/jpeg' }));
+    let left = SNAP_SECS;
+    ov.innerHTML = `<div class="snap-top"><b>${esc(nameOf(m.sender).split(' ')[0])}</b><span id="snap-left">${left}</span></div>
+      <div class="snap-bar"><i style="animation-duration:${SNAP_SECS}s"></i></div>
+      <img src="${url}" class="nosave" alt="Anlık foto" draggable="false"><p class="snap-hint">Kapatmak için dokun</p>`;
+    ov.oncontextmenu = (e) => e.preventDefault();
+    ov.onclick = close;
+    timer = setInterval(() => { left -= 1; const el = document.getElementById('snap-left'); if (el) el.textContent = Math.max(0, left); if (left <= 0) close(); }, 1000);
+  } catch (e) { ov.remove(); snapOpen = false; toast('Açılamadı: ' + errText(e)); }
+}
+async function finishSnap(id) {
+  try {
+    const path = await rpc('snap_try_finish', { p_message: id });
+    if (path) await sb.storage.from('chat').remove([path]);
+  } catch (_) { /* sonra tekrar denenir */ }
+}
+// Herkesin açtığı ya da süresi dolan fotoğrafları temizle (sohbeti açan herkes yardım eder)
+function cleanSnaps() {
+  const total = (m) => snapOthers(m);
+  C.list.filter((m) => m.kind === 'snap' && m.audio_path
+    && (Date.now() - new Date(m.created_at).getTime() > SNAP_TTL || (C.snapViews.get(m.id) || []).length >= total(m)))
+    .forEach((m) => finishSnap(m.id));
 }

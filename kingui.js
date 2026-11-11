@@ -83,15 +83,7 @@ export function draw(game, box, call) {
   } else if (game.status === 'abandoned') {
     status = '<div class="g-status">Masa kapatıldı</div>';
   } else if (st.phase === 'choose') {
-    if (myTurn) {
-      const ch = K.choicesFor(st, mine);
-      const p = st.picks[mine];
-      status = `<div class="k-pick"><b>${st.hand}. eli sen seçiyorsun</b>
-        <span class="small">Kalan hakların: ${K.CEZA_PER_PLAYER - p.ceza} ceza, ${K.KOZ_PER_PLAYER - p.koz} koz</span>
-        <div class="k-opts">${ch.filter((t) => t !== 'koz').map((t) => `<button class="k-opt ${KU.pickType === t ? 'on' : ''}" data-ct="${t}"><b>${K.CONTRACTS[t].name}</b><span>${K.CONTRACTS[t].short}${st.used[t] ? ` · ${K.CEZA_TIMES - st.used[t]} kaldı` : ''}</span></button>`).join('')}</div>
-        ${ch.includes('koz') ? `<p class="small" style="margin-top:4px">Koz seç (her el +50):</p><div class="k-suits">${K.SUITS.map((s) => `<button class="k-suit ${s === 'H' || s === 'D' ? 'red' : ''}" data-koz="${s}" aria-label="Koz ${K.SUIT_NAME[s]}">${K.SUIT_SYM[s]}<span>${K.SUIT_NAME[s]}</span></button>`).join('')}</div>` : ''}
-      </div>`;
-    } else status = `<div class="g-status">${esc(nameOf(game.players[st.chooser]))} ${st.hand}. eli seçiyor…</div>`;
+    status = ''; // seçim paneli masanın üstünde, herkes görür
   } else if (!playing) status = `<div class="g-status">Sıra ${esc(nameOf(game.players[st.turn]))}'de</div>`;
 
   const turnTxt = game.status !== 'active' ? '' : st.phase === 'choose' ? '' : myTurn
@@ -105,9 +97,10 @@ export function draw(game, box, call) {
   box.innerHTML = `
     ${playing && game.status === 'active' ? '<div id="k-voice"></div>' : ''}
     ${banner}
-    <div class="k-table">
+    <div class="k-table ${st.phase === 'choose' && game.status === 'active' ? 'choosing' : ''}">
       ${[0, 1, 2, 3].filter((i) => i !== mine || !playing).map(seatBox).join('')}
       <div class="k-center">${center}</div>
+      ${st.phase === 'choose' && game.status === 'active' ? choosePanel(game, st, myTurn) : ''}
       ${turnTxt ? `<span class="k-turn ${myTurn ? 'me' : ''}">${turnTxt}</span>` : ''}
     </div>
     ${status}
@@ -143,17 +136,18 @@ export function draw(game, box, call) {
   });
   document.getElementById('k-play')?.addEventListener('click', () => KU.sel && doPlay(KU.sel));
   box.querySelectorAll('[data-ct]').forEach((b) => b.onclick = async () => {
-    const t = b.dataset.ct;
+    const t = b.dataset.ct; if (b.disabled) return;
     if (!confirm(`${st.hand}. el: ${K.CONTRACTS[t].name} seçilsin mi?`)) return;
     await call('choose', { type: t });
   });
   box.querySelectorAll('[data-koz]').forEach((b) => b.onclick = async () => {
-    const s = b.dataset.koz;
+    const s = b.dataset.koz; if (b.disabled) return;
     if (!confirm(`${st.hand}. el: Koz ${K.SUIT_NAME[s]} seçilsin mi?`)) return;
     await call('choose', { type: 'koz', trump: s });
   });
   box.querySelectorAll('#k-table').forEach((b) => b.onclick = () => scoreSheet(game));
   trickFx(game);
+  chosenFx(game);
   if (playing && game.status === 'active') {
     Voice.watch(game.id, game.players, drawVoice);
     Voice.setTreatHandler((p) => showTreat(game, p));
@@ -336,4 +330,42 @@ function trickFx(game) {
     game.players.filter((u) => !lost.includes(u)).forEach((u) => floatAt(avatarEl(u), pick(LAUGH), 'react', 2800));
     if (lost.includes(me())) navigator.vibrate?.([30, 40, 30]);
   }, 450);
+}
+
+// ================================================================== oyun seçim paneli (herkes görür)
+function choosePanel(game, st, myTurn) {
+  const ch = K.choicesFor(st, st.chooser);
+  const p = st.picks[st.chooser];
+  const who = esc(nameOf(game.players[st.chooser]).split(' ')[0]);
+  const tile = (t) => {
+    const ok = ch.includes(t), left = K.CEZA_TIMES - (st.used[t] || 0);
+    return `<button class="kc-t ${ok ? '' : 'off'} ${left <= 0 ? 'gone' : ''}" data-ct="${t}" ${myTurn && ok ? '' : 'disabled'}>
+      <b>${K.CONTRACTS[t].name}</b>${left > 0 && left < K.CEZA_TIMES ? `<small>${left} kaldı</small>` : ''}</button>`;
+  };
+  const kozOk = ch.includes('koz');
+  const suits = ['D', 'C', 'H', 'S'];
+  const note = myTurn
+    ? `Kalan hakların: ${K.CEZA_PER_PLAYER - p.ceza} ceza, ${K.KOZ_PER_PLAYER - p.koz} koz${st.hand < K.KOZ_FROM_HAND ? ' · koz 5. elden itibaren' : ''}`
+    : st.hand < K.KOZ_FROM_HAND ? 'İlk 4 elde koz seçilemez' : `${who}: ${K.CEZA_PER_PLAYER - p.ceza} ceza, ${K.KOZ_PER_PLAYER - p.koz} koz hakkı`;
+  return `<div class="k-choose ${myTurn ? 'mine' : ''}">
+    <div class="kc-h"><b>Oyun seçimi · ${st.hand}. el</b><span>${myTurn ? 'Sen seçiyorsun' : `${who} seçiyor…`}</span></div>
+    <div class="kc-grid">${K.CEZA.map(tile).join('')}</div>
+    <div class="kc-suits ${kozOk ? '' : 'off'}">${suits.map((s) => `<button class="kc-s ${s === 'H' || s === 'D' ? 'red' : ''}" data-koz="${s}" ${myTurn && kozOk ? '' : 'disabled'} aria-label="Koz ${K.SUIT_NAME[s]}">${K.SUIT_SYM[s]}</button>`).join('')}</div>
+    <p class="kc-note">${note}</p>
+  </div>`;
+}
+// Seçilen oyun herkeste bir anlığına parlasın
+function chosenFx(game) {
+  const st = game.state;
+  const key = `${game.id}|${st.hand}|${st.phase}`;
+  const prev = KU.ctKey; KU.ctKey = key;
+  if (!prev || prev.split('|')[0] !== game.id) return;
+  if (st.phase !== 'play' || !st.contract || st.tricksDone > 0 || st.trick.length > 1) return;
+  if (prev !== `${game.id}|${st.hand}|choose`) return;
+  const tb = document.querySelector('.k-table'); if (!tb) return;
+  const d = document.createElement('div');
+  d.className = 'kc-flash' + (st.contract.type === 'koz' && ['H', 'D'].includes(st.contract.trump) ? ' red' : '');
+  d.innerHTML = `<b>${esc(ctName(st.contract))}</b><span>${esc(nameOf(game.players[st.chooser]).split(' ')[0])} seçti</span>`;
+  tb.appendChild(d);
+  setTimeout(() => d.remove(), 1800);
 }

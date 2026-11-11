@@ -21,6 +21,7 @@ export const CEZA = ['el', 'kupa', 'erkek', 'kiz', 'rifki', 'soniki'];
 export const KOZ_PER_PLAYER = 2;
 export const CEZA_PER_PLAYER = 3;
 export const CEZA_TIMES = 2;
+export const KOZ_FROM_HAND = 5; // ilk 4 elde koz seçilemez
 
 export const suitOf = (c) => c[0];
 export const rankOf = (c) => +c.slice(1);
@@ -31,9 +32,15 @@ export function fullDeck() {
   for (const s of SUITS) for (let r = 2; r <= 14; r++) d.push(s + r);
   return d;
 }
+// Eldeki renkleri kırmızı-siyah sırayla diz (aynı renkler mümkün olduğunca yan yana gelmesin), küçükten büyüğe
 export function sortHand(h) {
-  const order = { S: 0, H: 1, C: 2, D: 3 }; // renkler kırmızı-siyah sırayla
-  return [...h].sort((a, b) => order[suitOf(a)] - order[suitOf(b)] || rankOf(b) - rankOf(a));
+  const has = (s) => h.some((c) => suitOf(c) === s);
+  const reds = ['D', 'H'].filter(has), blacks = ['C', 'S'].filter(has);
+  const [a, b] = reds.length >= blacks.length ? [reds, blacks] : [blacks, reds];
+  const seq = [];
+  for (let i = 0; i < a.length; i++) { seq.push(a[i]); if (b[i]) seq.push(b[i]); }
+  const order = Object.fromEntries(seq.map((s, i) => [s, i]));
+  return [...h].sort((x, y) => order[suitOf(x)] - order[suitOf(y)] || rankOf(x) - rankOf(y));
 }
 // rnd(n): 0..n-1 arası eşit olasılıklı tamsayı
 export function deal(rnd) {
@@ -136,7 +143,7 @@ export function choicesFor(st, seat) {
   const used = st.used || {};
   const out = [];
   if (p.ceza < CEZA_PER_PLAYER) for (const k of CEZA) if ((used[k] || 0) < CEZA_TIMES) out.push(k);
-  if (p.koz < KOZ_PER_PLAYER) out.push('koz');
+  if (p.koz < KOZ_PER_PLAYER && st.hand >= KOZ_FROM_HAND) out.push('koz');
   // Kalan seçimler sığmalı: koz hakkı kalan seçim sayısını aşmasın
   return out;
 }
