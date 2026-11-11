@@ -826,7 +826,7 @@ function topBlock() {
     <div><p class="top-date">${esc(today.charAt(0).toLocaleUpperCase('tr-TR') + today.slice(1))}</p>
       <h1 class="top-hi">${greeting()}, ${esc(first)}</h1></div>
     ${others.length ? `<div class="top-people"><span class="avatars">${others.slice(0, 6).map((m) => avatar(m.display_name, m.user_id)).join('')}</span>
-      <span>${esc(S.ctx.group_name || 'Tayfa')} · ${act.length} kişi</span></div>` : ''}
+      <span>${act.length} kişi</span></div>` : ''}
   </section>`;
 }
 
