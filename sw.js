@@ -4,7 +4,7 @@
 //   ve uygulama kendini yeniler.
 // - Fotoğraflar da telefonda saklanır, ikinci açılışta internetten tekrar indirilmez.
 // - Bildirime dokununca ilgili ekran açılır.
-const CACHE = 'tayfa-v3.5.0';
+const CACHE = 'tayfa-v3.5.1';
 const PHOTO_CACHE = 'tayfa-foto-v1';
 const ROUTE_CACHE = 'tayfa-yonlendirme';
 const MAX_PHOTOS = 600;

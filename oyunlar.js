@@ -90,7 +90,7 @@ export async function loadMyTurns() {
 
 // ------------------------------------------------------------------ sekme
 export function tabView() {
-  return `${header('Oyunlar', 'Tayfanla karşılıklı oyna')}<div id="games-body"><p class="sub">Yükleniyor…</p></div>`;
+  return `${header('Oyunlar')}<div id="games-body"><p class="sub">Yükleniyor…</p></div>`;
 }
 
 export async function mount() {
@@ -119,9 +119,27 @@ function drawTab() {
       .forEach((g) => { wins[g.winner] = (wins[g.winner] || 0) + 1; });
     return { k, n, ic, soon: k === 'batak' || k === 'okey', top: Object.entries(wins).sort((a, b) => b[1] - a[1]).slice(0, 3) };
   });
-  const MED = ['🥇', '🥈', '🥉'];
-  const bestCol = (c) => `<div class="best-col ${c.soon ? 'later' : ''}"><div class="best-h"><span class="game-ic ${c.k}">${svg(c.ic)}</span>${c.n}</div>
-    ${c.soon ? '<p class="best-e">Yakında</p>' : c.top.length ? c.top.map(([u, n], i) => `<div class="best-r"><i>${MED[i]}</i>${avatar(nameOf(u), u)}<b>${esc(nameOf(u).split(' ')[0])}</b><span>${n}</span></div>`).join('') : '<p class="best-e">Henüz yok</p>'}</div>`;
+  const first = (u) => esc(nameOf(u).split(' ')[0]);
+  const live = best.filter((c) => !c.soon);
+  const champCols = live.length >= 5 ? 3 : 2;
+  const champ = (c) => {
+    const [w, n] = c.top[0] || []; const sec = c.top[1];
+    return `<div class="ch-cell"><span class="ch-g">${c.n}</span>
+      ${w ? `<div class="ch-w">${avatar(nameOf(w), w)}<b>${first(w)}</b></div><span class="ch-s">${n} galibiyet${sec ? ` · 2. ${first(sec[0])}` : ''}</span>`
+        : '<div class="ch-w ch-none">Henüz yok</div><span class="ch-s">&nbsp;</span>'}</div>`;
+  };
+  const GAMES = [['tavla', 'Tavla', 'tavla', '2 kişi', 'new-tavla'], ['king', 'King', 'crown', '4 kişi', 'new-king'],
+    ['batak', 'Batak', 'spade', '4 kişi', null], ['okey', 'Okey', 'tile', '4 kişi', null]];
+  const gameCols = GAMES.length >= 5 ? 3 : 2;
+  const gameCard = ([k, n, ic, sub, id]) => `<${id ? `button id="${id}"` : 'div'} class="gm-card ${id ? '' : 'later'}">
+    <span class="game-ic ${k}">${svg(ic)}</span><b>${n}</b><span class="small">${sub}</span>
+    <span class="gm-go">${id ? `Masa aç ${svg('chev')}` : 'Yakında'}</span></${id ? 'button' : 'div'}>`;
+  const chip = (g) => {
+    const myTurn = g.turn === me();
+    const who = g.kind === 'king' ? `King · ${g.state?.hand || 1}. el` : `${first(g.players.find((p) => p !== me()) || g.players[1])} ile`;
+    return `<button class="m-chip ${myTurn ? 'my' : ''}" data-game="${g.id}"><span class="game-ic ${g.kind}">${svg(g.kind === 'king' ? 'crown' : 'tavla')}</span>
+      <span class="grow"><b>${who}</b><small>${myTurn ? 'Sıra sende' : 'Bekle'}</small></span></button>`;
+  };
   const row = (g) => {
     if (g.kind === 'king') {
       const st = g.state; const pi = g.players.indexOf(me());
@@ -142,17 +160,12 @@ function drawTab() {
       ${g.players.includes(me()) ? `<span class="pill" style="${myTurn ? 'background:var(--accent);color:#fff' : ''}">${myTurn ? 'Sıra sende' : 'Sıra onda'}</span>` : `<span class="pill">İzle</span>`}</button>`;
   };
   box.innerHTML = `
-    ${mineActive.length ? `<section class="card"><h2>Maçların</h2>${mineActive.map(row).join('')}</section>` : ''}
-    <section class="card"><h2>Bu ayın en iyileri 🏆</h2><div class="best">${best.map(bestCol).join('')}</div><p class="small" style="margin-top:6px">Bu ay kazanılan maç sayısı</p></section>
-    <section class="card"><h2>Yeni oyun</h2>
-      <div class="list-row"><span class="game-ic tavla">${svg('tavla')}</span><div class="grow"><div class="name">Tavla</div><div class="small">2 kişi · sırayla · zarlar sunucuda atılır</div></div>
-        <button class="btn small primary" id="new-tavla">Masa aç</button></div>
-      <div class="list-row"><span class="game-ic king">${svg('crown')}</span><div class="grow"><div class="name">King</div><div class="small">4 kişi · 20 el · kartlar sunucuda dağıtılır</div></div>
-        <button class="btn small primary" id="new-king">Masa aç</button></div>
-      ${[['Batak', 'batak', 'spade'], ['Okey', 'okey', 'tile']].map(([n, c, i]) => `<div class="list-row"><span class="game-ic ${c}">${svg(i)}</span><div class="grow"><div class="name">${n}</div><div class="small">4 kişi</div></div><span class="pill" style="background:var(--line);color:var(--sub)">Yakında</span></div>`).join('')}
-    </section>
-    ${othersActive.length ? `<section class="card"><h2>Gruptaki diğer maçlar</h2>${othersActive.map(row).join('')}</section>` : ''}
-    </section>`;
+    ${mineActive.length === 1 ? `<section class="card m-one">${row(mineActive[0])}</section>`
+      : mineActive.length ? `<div class="m-strip">${mineActive.map(chip).join('')}</div>` : ''}
+    <section class="champ"><div class="champ-h"><b>Bu ayın şampiyonları</b>${svg('trophy')}</div>
+      <div class="champ-g c${champCols}">${live.map(champ).join('')}</div></section>
+    <div class="gm-grid c${gameCols}">${GAMES.map(gameCard).join('')}</div>
+    ${othersActive.length ? `<section class="card"><h2>Gruptaki diğer maçlar</h2>${othersActive.map(row).join('')}</section>` : ''}`;
   box.querySelectorAll('[data-game]').forEach((b) => b.onclick = () => openGame(b.dataset.game));
   document.getElementById('new-tavla').onclick = pickOpponent;
   document.getElementById('new-king').onclick = pickKing;

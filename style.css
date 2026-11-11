@@ -830,3 +830,35 @@ body.kb-open .sheet.gc-sheet { height: calc(var(--vvh, 100vh) - 16px); }
 .kc-flash b { display: block; font-size: 22px; } .kc-flash span { font-size: 12px; color: #5B6B78; }
 .kc-flash.red b { color: #C9302C; }
 @keyframes kcFlash { 0% { transform: translate(-50%, -50%) scale(.4); opacity: 0; } 15% { transform: translate(-50%, -50%) scale(1.08); opacity: 1; } 25% { transform: translate(-50%, -50%) scale(1); } 80% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -60%) scale(1); } }
+
+/* Oyunlar: B düzeni */
+.m-one { padding: 6px 12px; } .m-one .game-row { border: none; }
+.m-strip { display: flex; gap: 8px; overflow-x: auto; margin: -6px -16px 6px; padding: 6px 16px 10px; scrollbar-width: none; }
+.m-strip::-webkit-scrollbar { display: none; }
+.m-chip { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; background: var(--card); border: none; border-radius: 16px; padding: 8px 12px 8px 8px; box-shadow: var(--shadow); color: var(--ink); text-align: left; }
+.m-chip .game-ic { width: 34px; height: 34px; border-radius: 11px; } .m-chip .game-ic svg { width: 19px; height: 19px; }
+.m-chip b { display: block; font-size: 14px; } .m-chip small { font-size: 12px; color: var(--sub); }
+.m-chip.my small { color: var(--accent); font-weight: 700; }
+.champ { background: var(--navy); color: #FFF; border-radius: 22px; padding: 14px 16px; margin-bottom: 12px; }
+.champ-h { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.champ-h b { font-size: 15px; } .champ-h svg { width: 20px; height: 20px; color: #FFD27A; }
+.champ-g { display: grid; gap: 12px 0; }
+.champ-g.c2 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .champ-g.c3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.ch-cell { min-width: 0; padding: 0 12px; border-left: 1px solid rgba(255,255,255,.15); }
+.champ-g.c2 .ch-cell:nth-child(2n+1), .champ-g.c3 .ch-cell:nth-child(3n+1) { border-left: none; padding-left: 0; }
+.ch-g { display: block; font-size: 12px; color: #9FB4C7; margin-bottom: 4px; }
+.ch-w { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.ch-w .av { width: 28px; height: 28px; font-size: 12px; margin: 0; flex-shrink: 0; box-shadow: none; border: none; }
+.ch-w b { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ch-none { font-size: 14px; color: #9FB4C7; height: 28px; }
+.ch-s { display: block; font-size: 12px; color: #9FB4C7; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gm-grid { display: grid; gap: 10px; margin-bottom: 12px; }
+.gm-grid.c2 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .gm-grid.c3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.gm-card { background: var(--card); border: none; border-radius: 18px; padding: 12px; box-shadow: var(--shadow); display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; color: var(--ink); font: inherit; }
+.gm-card .game-ic { width: 40px; height: 40px; border-radius: 12px; margin-bottom: 6px; } .gm-card .game-ic svg { width: 22px; height: 22px; }
+.gm-card b { font-size: 16px; } .gm-card .small { margin: 0; }
+.gm-go { margin-top: 8px; color: var(--accent); font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 2px; }
+.gm-go svg { width: 16px; height: 16px; }
+.gm-card.later { opacity: .55; box-shadow: none; } .gm-card.later .gm-go { color: var(--sub); font-weight: 600; }
+.gm-card:not(.later):active { transform: scale(.98); }
+:root[data-theme="dark"] .champ { background: #0F2638; }
