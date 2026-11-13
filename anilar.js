@@ -1,7 +1,7 @@
 // Anılar: harita, albümler, fotoğraf yükleme (sadece yönetici) ve görüntüleyici
 import {
   sb, S, esc, svg, avatar, toast, errText, rpc, fmt, openSheet, closeSheet, sheetHead, field, val,
-  isAdmin, me, nameOf, render, header, bindHeader, goMain,
+  isAdmin, me, nameOf, render, header, bindHeader, goMain, whoPop, whoList,
 } from './app.js';
 
 const ROAD_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
@@ -158,22 +158,58 @@ async function drawMap() {
     A.loose = r.data || [];
   }
   const url = await signed(pts.map((a) => a.cover_thumb).concat(A.loose.map((p) => p.thumb_path)));
-  for (const g of groupNearby(A.loose)) {
+  // Haritadaki noktalar: albümler + yakın albümsüz fotoğraf grupları. Uzaklaştırınca üst üste binenler birleşir.
+  const items = groupNearby(A.loose).map((g) => ({
+    lng: g.lng, lat: g.lat, n: g.photos.length, thumb: g.photos[0].thumb_path, single: true,
+    open: () => placeSheet({ loose: la, photos: g.photos }),
+  })).concat(pts.map((a) => ({
+    lng: a.lng, lat: a.lat, n: a.photo_count, thumb: a.cover_thumb, title: a.title,
+    open: () => placeSheet({ album: a }),
+  })));
+  let markers = [];
+  const pin = (cls, thumb, n, label) => {
     const el = document.createElement('button');
-    el.className = 'map-pin single';
-    el.setAttribute('aria-label', `${g.photos.length} fotoğraf`);
-    el.innerHTML = `<span class="map-pin-img nosave" style="background-image:url('${url(g.photos[0].thumb_path)}')"></span>${g.photos.length > 1 ? `<span class="map-pin-n">${g.photos.length}</span>` : ''}`;
-    el.onclick = (ev) => { ev.stopPropagation(); map.easeTo({ center: [g.lng, g.lat], duration: 400 }); placeSheet({ loose: la, photos: g.photos }); };
-    new ml.Marker({ element: el, anchor: 'bottom' }).setLngLat([g.lng, g.lat]).addTo(map);
-  }
-  for (const a of pts) {
-    const el = document.createElement('button');
-    el.className = 'map-pin';
-    el.setAttribute('aria-label', a.title);
-    el.innerHTML = `<span class="map-pin-img nosave" style="${a.cover_thumb ? `background-image:url('${url(a.cover_thumb)}')` : ''}"></span><span class="map-pin-n">${a.photo_count}</span>`;
-    el.onclick = (ev) => { ev.stopPropagation(); map.easeTo({ center: [a.lng, a.lat], duration: 400 }); placeSheet({ album: a }); };
-    new ml.Marker({ element: el, anchor: 'bottom' }).setLngLat([a.lng, a.lat]).addTo(map);
-  }
+    el.className = 'map-pin ' + cls;
+    el.setAttribute('aria-label', label);
+    el.innerHTML = `<span class="map-pin-img nosave" style="${thumb ? `background-image:url('${url(thumb)}')` : ''}"></span>${n > 1 || cls === '' ? `<span class="map-pin-n">${n}</span>` : ''}`;
+    return el;
+  };
+  const drawPins = () => {
+    if (!map) return;
+    markers.forEach((m) => m.remove()); markers = [];
+    const R = 46; // piksel: bundan yakın noktalar tek iğne olur
+    const groups = [];
+    for (const it of items) {
+      const p = map.project([it.lng, it.lat]);
+      const g = groups.find((x) => Math.abs(x.x - p.x) < R && Math.abs(x.y - p.y) < R);
+      if (g) g.items.push(it); else groups.push({ x: p.x, y: p.y, items: [it] });
+    }
+    for (const g of groups) {
+      let el, ll;
+      if (g.items.length === 1) {
+        const it = g.items[0];
+        el = pin(it.single ? 'single' : '', it.thumb, it.n, it.title || `${it.n} fotoğraf`);
+        ll = [it.lng, it.lat];
+        el.onclick = (ev) => { ev.stopPropagation(); map.easeTo({ center: ll, duration: 400 }); it.open(); };
+      } else {
+        const total = g.items.reduce((t, it) => t + (+it.n || 0), 0);
+        const lng = g.items.reduce((t, it) => t + it.lng, 0) / g.items.length;
+        const lat = g.items.reduce((t, it) => t + it.lat, 0) / g.items.length;
+        ll = [lng, lat];
+        el = pin('cluster', g.items[0].thumb, total, `${g.items.length} yer, ${total} fotoğraf`);
+        el.insertAdjacentHTML('beforeend', `<span class="map-pin-k">${g.items.length} yer</span>`);
+        el.onclick = (ev) => {
+          ev.stopPropagation();
+          const b = new ml.LngLatBounds(); g.items.forEach((it) => b.extend([it.lng, it.lat]));
+          map.fitBounds(b, { padding: 80, maxZoom: Math.max(map.getZoom() + 2, 12), duration: 500 });
+        };
+      }
+      markers.push(new ml.Marker({ element: el, anchor: 'bottom' }).setLngLat(ll).addTo(map));
+    }
+  };
+  map.on('zoomend', drawPins);
+  map.once('load', drawPins);
+  drawPins();
   const all = pts.map((a) => [a.lng, a.lat]).concat(A.loose.map((p) => [p.lng, p.lat]));
   if (all.length === 1) map.jumpTo({ center: all[0], zoom: 10 });
   else if (all.length > 1) {
@@ -380,12 +416,13 @@ function openViewer(start, onClose) {
         ${isAdmin() ? `<button class="icon-btn dark" id="v-more" aria-label="Fotoğraf seçenekleri">${svg('dots')}</button>` : '<span style="width:44px"></span>'}</div>
       <div class="viewer-stage" id="v-stage"><div class="viewer-img nosave" style="background-image:url('${url(p.path)}')"></div><div class="viewer-shield"></div></div>
       <div class="viewer-bottom">
-        <button class="like-btn ${liked ? 'on' : ''}" id="v-like">${svg('heart')}<span>${n || ''}</span></button>
+        <span class="like-wrap"><button class="like-btn ${liked ? 'on' : ''}" id="v-like" aria-label="Beğen">${svg('heart')}</button>${n ? `<button class="like-n" id="v-likers">${n}</button>` : ''}</span>
         <span class="small" style="color:#CFC6BF">${p.taken_at ? esc(dateYear(new Date(p.taken_at))) : ''}</span>
       </div></div>`;
     const close = () => { root.innerHTML = ''; if (onClose) onClose(); else drawAlbum(); };
     document.getElementById('v-close').onclick = close;
     document.getElementById('v-more')?.addEventListener('click', () => photoMenu(p, close, () => draw()));
+    document.getElementById('v-likers')?.addEventListener('click', (e) => whoPop(e.currentTarget, whoList([['❤️', likesOf(p.id).map((l) => l.user_id)]])));
     document.getElementById('v-like').onclick = async () => {
       try {
         const on = await rpc('toggle_like', { p_photo: p.id });

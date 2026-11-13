@@ -3,6 +3,7 @@ import { SUPABASE_URL, SUPABASE_KEY, VAPID_PUBLIC_KEY, APP_VERSION } from './con
 import * as Anilar from './anilar.js';
 import * as Sohbet from './sohbet.js';
 import * as Oyunlar from './oyunlar.js';
+import * as Quiz from './quiz.js';
 import { ensureDevice } from './e2e.js';
 
 // İstekler asılı kalmasın: iPhone ağ değiştirince (Wi-Fi ↔ mobil) bazen cevap hiç gelmiyor, uygulama donuyordu.
@@ -71,6 +72,8 @@ const ICON = {
   chev: '<path d="M9 6l6 6-6 6"/>',
   trophy: '<path d="M8 4h8v5a4 4 0 0 1-8 0z"/><path d="M8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4M12 13v4M8 20h8"/>',
   check: '<path d="M5 12l5 5L20 7"/>',
+  refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/>',
+  bulb: '<path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2V16h5v-.1c0-.8.4-1.5 1-2A6 6 0 0 0 12 3z"/>',
   headset: '<path d="M4 14v-2a8 8 0 0 1 16 0v2"/><rect x="3" y="14" width="4" height="6" rx="1.5"/><rect x="17" y="14" width="4" height="6" rx="1.5"/>',
   micOff: '<path d="M9 9v2a3 3 0 0 0 5.1 2.1M15 9.3V6a3 3 0 0 0-5.9-.7"/><path d="M5 11a7 7 0 0 0 11.3 5.5M19 11a7 7 0 0 1-.6 2.8M12 18v3M3 3l18 18"/>',
   phoneOff: '<path d="M3 15.5c5-4 13-4 18 0l-2 3-3.5-1.2v-2.6a10 10 0 0 0-7 0v2.6L5 18.5z"/>',
@@ -161,12 +164,41 @@ let pendingReload = false;
 const safeToReload = () => {
   const a = document.activeElement;
   const typing = a && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT') && a.value;
-  return !typing && !document.getElementById('sb') && S.view !== 'game';
+  return !typing && !document.getElementById('sb') && !document.getElementById('quiz') && S.view !== 'game';
 };
+// Küçük açılır kutu (örn. tepkiye kim bastı): dokununca açılır, başka yere dokununca kapanır
+export function whoPop(anchor, html) {
+  document.querySelector('.who-pop')?.remove();
+  const r = anchor.getBoundingClientRect();
+  const d = document.createElement('div');
+  d.className = 'who-pop'; d.innerHTML = html;
+  document.body.appendChild(d);
+  const w = d.offsetWidth, h = d.offsetHeight;
+  d.style.left = `${Math.max(8, Math.min(innerWidth - w - 8, r.left + r.width / 2 - w / 2))}px`;
+  d.style.top = `${r.top - h - 8 > 8 ? r.top - h - 8 : r.bottom + 8}px`;
+  setTimeout(() => document.addEventListener('pointerdown', function off(e) {
+    if (!d.contains(e.target)) { d.remove(); document.removeEventListener('pointerdown', off, true); }
+  }, true), 0);
+  setTimeout(() => d.remove(), 6000);
+}
+export function whoList(groups) { // groups: [[emoji, [uid...]], ...]
+  return groups.map(([e, uids]) => `<div class="who-row"><span class="who-e">${e}</span><span>${uids.map((u) => esc(nameOf(u).split(' ')[0]) + (u === me() ? ' (sen)' : '')).join(', ')}</span></div>`).join('');
+}
+// Yeni sürüm: boştaysan kendiliğinden yenilenir, meşgulsen üstte "Yenile" bandı çıkar
+function showUpdateBand() {
+  if (document.getElementById('upd-band')) return;
+  const b = document.createElement('button');
+  b.id = 'upd-band'; b.className = 'upd-band';
+  b.innerHTML = `${svg('refresh')}<span>Yeni sürüm var</span><b>Yenile</b>`;
+  b.onclick = () => location.reload();
+  document.body.appendChild(b);
+}
 navigator.serviceWorker?.addEventListener('controllerchange', () => {
   if (!hadController) { hadController = true; return; }
-  if (safeToReload()) location.reload(); else pendingReload = true;
+  if (safeToReload()) location.reload(); else { pendingReload = true; showUpdateBand(); }
 });
+// Meşguliyet bitince (sayfa değişince) bekleyen güncellemeyi uygula
+setInterval(() => { if (pendingReload && safeToReload() && document.visibilityState === 'visible') location.reload(); }, 4000);
 
 // Bildirime dokununca gidilecek yer (servis çalışanı kaydeder). iPhone'da mesaj bazen geç gelir;
 // uygulama uyanınca birkaç kez bakılır, yönlendirme başarılı olunca kayıt silinir.
@@ -387,6 +419,7 @@ async function loadData() {
   Sohbet.loadUnread().catch(() => {});
   loadInbox().catch(() => {});
   loadOnThisDay().catch(() => {});
+  Quiz.loadQuiz().catch(() => {});
 }
 
 // "Geçen yıl bugün": günde bir kez sorulur
@@ -490,7 +523,24 @@ async function refreshAll() {
 
 // ------------------------------------------------------------------ çizim
 let lastView = null, lastGame = null;
+// Sayfa geçişi: sekmeler arasında yana kayma, alt sayfalara girerken sağdan, dönerken soldan
+const TAB_ORDER = ['home', 'memory', 'chat', 'game'];
 function render() {
+  const r = renderNow();
+  try {
+    const key = S.view === 'main' ? 'main:' + S.tab : S.view === 'game' ? 'game:' + S.gameId : S.view === 'album' ? 'album:' + S.albumId : S.view;
+    const prev = render.lastKey; render.lastKey = key;
+    if (prev && prev !== key && S.session && S.ctx.status === 'active') {
+      let dir;
+      if (prev.startsWith('main:') && key.startsWith('main:')) dir = TAB_ORDER.indexOf(key.slice(5)) > TAB_ORDER.indexOf(prev.slice(5)) ? 'fwd' : 'back';
+      else dir = key.startsWith('main:') ? 'back' : 'fwd';
+      const el = $app.querySelector('.content') || $app.firstElementChild;
+      if (el) { el.classList.remove('pg-fwd', 'pg-back'); void el.offsetWidth; el.classList.add('pg-' + dir); }
+    }
+  } catch (_) { /* animasyon olmasa da olur */ }
+  return r;
+}
+function renderNow() {
   // Oyun ekranından herhangi bir yolla çıkılınca (bildirim, geri, kaydırma) kanalı hemen kapat, sunucuya bildir
   if (lastView === 'game' && (S.view !== 'game' || S.gameId !== lastGame)) Oyunlar.closeGame();
   lastView = S.view; lastGame = S.gameId;
@@ -523,6 +573,13 @@ export function route(hash) {
     closeSheet(); render();
     if (location.hash) history.replaceState(null, '', location.pathname);
     Anilar.openNew({ album: id, count, ts });
+    return true;
+  }
+  else if (k === 'soru') { // günün sorusu: ana sayfanın üstünde tam ekran
+    S.view = 'main'; S.tab = 'home';
+    closeSheet(); render();
+    if (location.hash) history.replaceState(null, '', location.pathname);
+    Quiz.openQuiz();
     return true;
   }
   else if (k === 'ana' || k === '') { S.view = 'main'; S.tab = 'home'; }
@@ -733,8 +790,7 @@ function renderMain() {
   else if (S.tab === 'memory') body = Anilar.tabView();
   else if (S.tab === 'chat') body = Sohbet.tabView();
   else body = Oyunlar.tabView();
-  const prevTab = renderMain.lastTab; renderMain.lastTab = S.tab;
-  $app.innerHTML = `<div class="screen ${prevTab && prevTab !== S.tab ? 'enter' : ''}">
+  $app.innerHTML = `<div class="screen">
     <main class="content ${S.tab === 'chat' ? 'chat-content' : ''}">${body}</main>
     ${S.tab === 'home' ? `<button class="fab" id="fab">${svg('plus')}${isAdmin() ? 'Etkinlik' : 'Etkinlik öner'}</button>` : ''}
     <nav class="tabbar" aria-label="Ana menü">${tabs.map(([k, l, i]) => `<button class="tab ${S.tab === k ? 'on' : ''}" data-tab="${k}" aria-label="${l}">${svg(i)}<span>${l}</span><i class="tab-dot hidden" data-dot="${k}"></i><i class="tab-n hidden" data-n="${k}"></i></button>`).join('')}</nav>
@@ -788,18 +844,20 @@ function heroCard(e) {
   const mine = rs.find((r) => r.user_id === me())?.answer;
   const waiting = Math.max(0, activeMembers().length - rs.length);
   const days = Math.round((new Date(new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(d)) - new Date(new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(new Date()))) / 864e5);
-  const when = days <= 0 ? 'BUGÜN' : days === 1 ? 'YARIN' : `${days} GÜN SONRA`;
-  const parts = [];
-  if (yes.length) parts.push(`${yes.length} kişi geliyor`);
-  if (waiting) parts.push(`${waiting} kişi bekleniyor`);
+  const hrs = Math.round((d - Date.now()) / 36e5);
+  const left = days > 1 ? `${days} gün kaldı` : days === 1 ? 'Yarın' : hrs > 1 ? `${hrs} saat kaldı` : hrs >= 0 ? 'Az kaldı' : 'Başladı';
   return `<section class="next" id="ev-${e.id}">
-    <div class="next-k"><span>SIRADAKİ ETKİNLİK · ${when}</span><span data-wx="${e.id}" data-short="1">${wxChip(WX.get(e.id), true)}</span></div>
+    <div class="next-k"><span>SIRADAKİ ETKİNLİK</span></div>
     <div class="ev-head">${dateBox(e)}<div style="flex:1;min-width:0"><h2>${esc(e.title)}</h2>
       <div class="ev-meta"><span>${svgInline('clock')}${esc(fmt.time(d))}</span>${e.place ? `<span>${svgInline('pin')}${esc(e.place)}</span>` : ''}</div></div></div>
     ${e.note ? `<p class="ev-note">${esc(e.note)}</p>` : ''}
-    <button class="people" data-who="${e.id}" style="border:none;background:none;padding:0;text-align:left">
-      <span class="avatars">${yes.slice(0, 6).map((r) => avatar(nameOf(r.user_id), r.user_id)).join('')}</span>
-      <span>${parts.join(' · ') || 'Henüz cevap yok'}</span></button>
+    <div class="ev-line">
+      <button class="people" data-who="${e.id}" style="border:none;background:none;padding:0;text-align:left">
+        ${yes.length ? `<span class="avatars">${yes.slice(0, 4).map((r) => avatar(nameOf(r.user_id), r.user_id)).join('')}</span>` : ''}
+        <span>${yes.length ? `${yes.length} geliyor` : waiting ? `${waiting} bekleniyor` : 'Cevap yok'}</span></button>
+      <span class="ev-wx" data-wx="${e.id}" data-short="1">${wxChip(WX.get(e.id), true)}</span>
+      <span class="ev-left">${svgInline('clock')}${left}</span>
+    </div>
     <div class="row2">
       <button class="btn ${mine === 'yes' ? 'ok-on' : 'primary'}" data-rsvp="${e.id}" data-a="yes">${mine === 'yes' ? '✓ Geliyorum' : 'Geliyorum'}</button>
       <button class="btn ${mine === 'no' ? 'no-on' : ''}" data-rsvp="${e.id}" data-a="no">${mine === 'no' ? '✓ Gelemem' : 'Gelemem'}</button>
@@ -879,6 +937,7 @@ function homeView() {
     o += `<button class="banner" id="go-push" style="background:var(--accent-soft);border-color:transparent;color:var(--accent-ink)"><span class="pip" style="background:var(--accent)"></span><span class="grow">${pushState() === 'needs-install' ? 'Bildirim almak için Tayfa\'yı ana ekrana ekle' : 'Yeni etkinliklerden haberdar olmak için bildirimleri aç'}</span><span>Aç</span></button>`;
   }
   o += turnStrip();
+  o += Quiz.quizCard();
   o += otdCard();
   h += `<div class="over">${o}</div>`;
   if (myPending.length) {
@@ -934,6 +993,7 @@ function bindHome() {
   if (S.tab === 'home' && S.view === 'main') fillWeather();
   $app.querySelectorAll('[data-go-game]').forEach((b) => b.onclick = () => route('#oyun/' + b.dataset.goGame));
   $app.querySelectorAll('[data-otd]').forEach((b) => b.onclick = () => route(b.dataset.loose === '1' ? '#anilar' : '#album/' + b.dataset.otd));
+  Quiz.bindQuizCard($app);
   document.getElementById('go-admin')?.addEventListener('click', () => { S.view = 'admin'; location.hash = 'yonetim'; render(); });
   document.getElementById('go-push')?.addEventListener('click', async () => { await enablePush(); render(); });
   $app.querySelectorAll('[data-rsvp]').forEach((b) => b.onclick = async () => {
@@ -1237,6 +1297,8 @@ document.addEventListener('visibilitychange', () => {
   if (S.session) { checkPendingSoon(); refreshAll(); }
 });
 window.addEventListener('hashchange', () => route(location.hash));
+// Basılı tutunca iPhone menüsü çıkmasın (yazı kutuları hariç)
+document.addEventListener('contextmenu', (e) => { if (!e.target.closest?.('input, textarea')) e.preventDefault(); });
 navigator.serviceWorker?.addEventListener('message', (e) => {
   if (e.data?.type === 'open' && e.data.url) {
     S.lastOpenMsg = Date.now();

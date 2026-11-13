@@ -387,9 +387,20 @@ const BOTTOM = [11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
 function drawChatBar() {
   const box = document.getElementById('g-chatbar'); if (!box || !G.game) return;
   const { last, unread } = Sohbet.gameChatSummary();
-  box.innerHTML = `<button class="gc-bar" id="g-chat">${svg('chat')}<span class="grow">${last ? esc(last) : G.game.kind === 'king' ? 'Masayla sohbet et' : 'Rakibinle sohbet et'}</span>${unread ? `<b class="gc-n">${unread}</b>` : ''}</button>`;
-  document.getElementById('g-chat').onclick = () => Sohbet.openGameChat(G.game);
+  const g = G.game;
+  const wait = g.status === 'active' && g.turn && g.turn !== me() && g.players.includes(me()) ? Date.now() - new Date(g.updated_at).getTime() : 0;
+  const canNudge = wait > 2 * 60 * 1000;
+  box.innerHTML = `<div class="gc-row"><button class="gc-bar" id="g-chat">${svg('chat')}<span class="grow">${last ? esc(last) : g.kind === 'king' ? 'Masayla sohbet et' : 'Rakibinle sohbet et'}</span>${unread ? `<b class="gc-n">${unread}</b>` : ''}</button>
+    ${canNudge ? `<button class="nudge-btn" id="g-nudge" aria-label="${esc(nameOf(g.turn).split(' ')[0])} adlı oyuncuyu dürt">👉 Dürt</button>` : ''}</div>`;
+  document.getElementById('g-chat').onclick = () => Sohbet.openGameChat(g);
+  document.getElementById('g-nudge')?.addEventListener('click', async (e) => {
+    const b = e.currentTarget; b.disabled = true;
+    try { await rpc('nudge_turn', { p_game: g.id }); toast(`${nameOf(g.turn).split(' ')[0]} dürtüldü 👉`); b.textContent = '✓ Dürtüldü'; }
+    catch (er) { toast(errText(er)); b.disabled = false; }
+  });
 }
+// Dürt tuşu süre dolunca kendiliğinden çıksın
+setInterval(() => { if (S.view === 'game' && G.game && !document.querySelector('.sheet') && !document.getElementById('g-nudge')) drawChatBar(); }, 20000);
 
 // Seçili taşın iki zarın toplamıyla (çiftte en uzağa) gidebileceği yerler. Ara nokta açık değilse gösterilmez.
 function sumTargets(legal, done, sel) {
