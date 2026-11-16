@@ -370,11 +370,13 @@ function gameMenu() {
   }
   const playing = g.players.includes(me()) && g.status === 'active';
   openSheet(`${sheetHead('Tavla')}
-    <p class="sub" style="line-height:1.5">Zarlar sunucuda atılır, hamleler kurallara göre kontrol edilir. Mars 2 sayı. Eli kaybeden yeni ele başlar.</p>
-    ${playing ? `<button class="btn block danger" id="g-resign">Pes et</button>` : ''}
+    <p class="sub" style="line-height:1.5">Zarlar sunucuda atılır, hamleler kurallara göre kontrol edilir. Mars 2 sayı. Vurkaç yok: rakibi vuran taş o tur devam edemez. Eli kaybeden yeni ele başlar.</p>
+    ${playing ? `<button class="btn block" id="g-hand-resign">Bu eli bırak (pes)</button>
+      <button class="btn block danger" id="g-resign">Maçı tamamen bırak</button>` : ''}
     <button class="btn block" data-close>Kapat</button>`, () => {
+    document.getElementById('g-hand-resign')?.addEventListener('click', handResignSheet);
     document.getElementById('g-resign')?.addEventListener('click', () => {
-      if (!confirm('Pes edersen maçı rakibin kazanır. Emin misin?')) return;
+      if (!confirm('Maçı bırakırsan rakibin maçı kazanır. Emin misin?')) return;
       closeSheet(); call('resign');
     });
   });
@@ -383,6 +385,21 @@ function gameMenu() {
 // beyazın bakışıyla: üst sıra soldan sağa 12..23, alt sıra soldan sağa 11..0
 const TOP = [12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23];
 const BOTTOM = [11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
+
+// Bu el için pes: 1 puan ya da mars (2 puan); rakip onaylarsa el biter
+function handResignSheet() {
+  const opp = nameOf(G.game.players.find((x) => x !== me())).split(' ')[0];
+  openSheet(`${sheetHead('Bu eli bırak')}
+    <p class="sub" style="line-height:1.5">${esc(opp)} kabul ederse el biter ve puanı o alır. Reddederse oyun devam eder. Maçın geri kalanı sürer.</p>
+    <button class="btn block" data-rp="1"><b>Normal pes</b> · ${esc(opp)} 1 puan alır</button>
+    <button class="btn block" data-rp="2"><b>Mars kabul</b> · ${esc(opp)} 2 puan alır</button>
+    <button class="btn block" data-close>Vazgeç</button>`, () => {
+    document.querySelectorAll('[data-rp]').forEach((b) => b.onclick = async () => {
+      closeSheet();
+      if (await call('offer_resign', { points: +b.dataset.rp })) toast(`Teklifin ${opp}'e gitti`);
+    });
+  });
+}
 
 function drawChatBar() {
   const box = document.getElementById('g-chatbar'); if (!box || !G.game) return;
@@ -497,7 +514,8 @@ function drawGame() {
   const offTgt = targetSet.has('off');
   const offSum = sumMap.has('off');
   const die = (n, used) => dieSvg(n, `${used ? 'used' : ''} ${animRoll ? 'rolling' : ''}`);
-  const lastInfo = st.last ? (st.last.resign ? `${esc(nameOf(g.players[st.last.by]))} pes etti`
+  const lastInfo = st.last ? (st.last.handResign ? `${esc(nameOf(g.players[st.last.by]))} önceki eli bıraktı${st.last.points === 2 ? ' (mars)' : ''}`
+    : st.last.resign ? `${esc(nameOf(g.players[st.last.by]))} pes etti`
     : `${esc(nameOf(g.players[st.last.by]))} ${st.last.roll ? st.last.roll.join('-') + ' attı' : ''}${st.last.pass ? ', oynayamadı' : ''}`) : '';
 
   let status = '';
@@ -521,6 +539,18 @@ function drawGame() {
       <button class="btn small primary" id="g-send" ${complete && !G.busy ? '' : 'disabled'}>${complete ? 'Hamleyi gönder' : `${legal.maxLen - G.done.length} hamle kaldı`}</button>
     </div>`;
 
+  // Pes teklifi
+  const ro = g.status === 'active' ? st.resignOffer : null;
+  let offerCard = '';
+  if (ro && p >= 0) {
+    const what = ro.points === 2 ? 'mars (2 puan)' : '1 puan';
+    offerCard = ro.by === p
+      ? `<div class="rs-card mine"><span>Pes teklifin bekleniyor · ${esc(nameOf(opp).split(' ')[0])}'e ${what}</span><button class="btn small" id="rs-cancel">Geri al</button></div>`
+      : `<div class="rs-card"><b>${esc(nameOf(opp).split(' ')[0])} bu eli bırakmak istiyor</b><span>Kabul edersen el biter, sen ${what} alırsın.</span>
+          <div class="rs-btns"><button class="btn small" id="rs-no">Reddet, oyna</button><button class="btn small primary" id="rs-yes">Kabul et</button></div></div>`;
+  } else if (g.status === 'active' && st.resignRejected && st.resignRejected.by === p) {
+    offerCard = `<div class="rs-card mine"><span>${esc(nameOf(opp).split(' ')[0])} pes teklifini reddetti, oyun sürüyor</span></div>`;
+  }
   const turnAv = (idx) => g.status === 'active' && st.turn === idx ? 'turn' : '';
   box.innerHTML = `
     <div class="g-score">
@@ -539,12 +569,18 @@ function drawGame() {
     </div>
     ${rolled && G.sel != null ? '<div class="g-legend"><span><i class="g"></i>Yeşil: tek zar</span><span><i class="r"></i>Kırmızı: iki zar toplamı</span></div>' : ''}
     ${lastInfo && !rolled && !oppRolling && g.status === 'active' ? `<p class="small" style="text-align:center">${lastInfo}</p>` : ''}
+    ${offerCard}
     ${status}
     ${myTurn && rolled && legal.maxLen === 0 ? '<p class="small" style="text-align:center">Oynanacak hamle yok.</p>' : ''}
     ${p >= 0 ? '<div id="g-chatbar"></div>' : ''}`;
   drawChatBar();
   if (animRoll) rollDice(box);
 
+  document.getElementById('rs-cancel')?.addEventListener('click', () => call('cancel_resign'));
+  document.getElementById('rs-no')?.addEventListener('click', () => call('answer_resign', { accept: false }));
+  document.getElementById('rs-yes')?.addEventListener('click', () => {
+    G.done = []; G.sel = null; call('answer_resign', { accept: true });
+  });
   document.getElementById('g-roll')?.addEventListener('click', () => call('roll'));
   document.getElementById('g-undo')?.addEventListener('click', () => { G.done.pop(); G.sel = null; drawGame(); });
   document.getElementById('g-send')?.addEventListener('click', () => call('move', { moves: G.done }));

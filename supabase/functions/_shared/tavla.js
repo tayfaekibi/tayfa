@@ -71,12 +71,13 @@ export function applyMove(s, p, m) {
 const moveKey = (m) => `${m.from}>${m.to}:${m.die}`;
 const seqKey = (seq) => seq.map(moveKey).join(',');
 
-// Zarların tamamı (ya da mümkün olan en fazlası) kullanılarak yapılabilecek bütün hamle dizileri
+// Zarların tamamı (ya da mümkün olan en fazlası) kullanılarak yapılabilecek bütün hamle dizileri.
+// Vurkaç yok: rakibi vuran taş o tur içinde yoluna devam edemez (vurduğu yerden başka hamle yapılamaz).
 export function legalSequences(s, p, dice) {
   const all = [];
   let maxLen = 0;
   const seen = new Set();
-  (function walk(state, remaining, seq) {
+  (function walk(state, remaining, seq, hitAt) {
     let moved = false;
     const tried = new Set();
     for (let i = 0; i < remaining.length; i++) {
@@ -85,15 +86,18 @@ export function legalSequences(s, p, dice) {
       tried.add(d);
       const rest = remaining.slice(0, i).concat(remaining.slice(i + 1));
       for (const m of singleMoves(state, p, d)) {
+        if (m.from !== 'bar' && hitAt.has(m.from)) continue;
         moved = true;
-        walk(applyMove(state, p, m), rest, seq.concat([m]));
+        const hit = m.to !== 'off' && oppCount(m.to, p, state) === 1;
+        const nextHit = hit ? new Set(hitAt).add(m.to) : hitAt;
+        walk(applyMove(state, p, m), rest, seq.concat([m]), nextHit);
       }
     }
     if (!moved) {
       const k = seqKey(seq);
       if (!seen.has(k)) { seen.add(k); all.push(seq); if (seq.length > maxLen) maxLen = seq.length; }
     }
-  })(s, dice.slice(), []);
+  })(s, dice.slice(), [], new Set());
   let res = all.filter((q) => q.length === maxLen);
   // Sadece bir zar oynanabiliyorsa ve zarlar farklıysa büyük zar oynanmalı
   if (maxLen === 1 && dice.length === 2 && dice[0] !== dice[1]) {

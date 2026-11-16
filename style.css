@@ -966,3 +966,9 @@ img, a, button { -webkit-touch-callout: none; -webkit-user-drag: none; }
 .nudge-btn { flex-shrink: 0; border: none; border-radius: 14px; background: var(--accent); color: #FFF; font: 800 14px/1 inherit; padding: 0 14px; animation: nudgeWig 2.4s ease-in-out infinite; }
 .nudge-btn:disabled { background: var(--sub); animation: none; }
 @keyframes nudgeWig { 0%, 85%, 100% { transform: none; } 90% { transform: rotate(-6deg); } 95% { transform: rotate(6deg); } }
+
+/* Tavla pes teklifi */
+.rs-card { margin: 10px 0; background: var(--card); border: 2px solid var(--accent); border-radius: 16px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; box-shadow: var(--shadow); }
+.rs-card b { font-size: 15px; } .rs-card span { font-size: 14px; color: var(--sub); }
+.rs-card.mine { border-color: var(--line); flex-direction: row; align-items: center; justify-content: space-between; gap: 10px; }
+.rs-btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }

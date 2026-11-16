@@ -58,7 +58,52 @@ Deno.serve(async (req) => {
     const notes: { to: string[]; title: string; body: string }[] = [];
     let system: string | null = null;
 
-    if (action === "resign") {
+    // Eli bitir (doğal bitiş ya da kabul edilen pes): puanı yaz, maç bittiyse kapat, yoksa yeni el
+    const finishHand = (w: number, points: number, how: string) => {
+      const wu = g.players[w], lu = g.players[1 - w];
+      st.score[w] += points;
+      st.resignOffer = null; st.resignRejected = null; st.dice = [];
+      const sc = `${st.score[0]}–${st.score[1]}`;
+      if (st.score[w] >= g.match_to) {
+        g.status = "finished";
+        g.winner = wu;
+        system = `${nameOf(wu)} tavlada ${nameOf(lu)}'yi ${st.score[w]}–${st.score[1 - w]} yendi`;
+        notes.push({ to: [lu === uid ? wu : lu].filter((x) => x !== uid), title: "Tavla bitti", body: `${nameOf(wu)} maçı ${st.score[w]}–${st.score[1 - w]} kazandı` });
+      } else {
+        const fresh = T.newBoard();
+        st.board = fresh.board; st.bar = fresh.bar; st.off = fresh.off;
+        st.hand = (st.hand ?? 1) + 1;
+        st.turn = 1 - w; // eli kaybeden başlar
+        st.lastHand = { winner: w, points, how };
+        const other = g.players.find((x: string) => x !== uid)!;
+        notes.push({ to: [other], title: "Tavla · yeni el", body: how === "pes"
+          ? `${nameOf(lu)} eli bıraktı, ${nameOf(wu)} ${points === 2 ? "mars (2 puan)" : "1 puan"} aldı. Skor ${sc}`
+          : `${nameOf(wu)} eli aldı${points === 2 ? " (mars!)" : ""}. Skor ${sc}, sıra sende` });
+      }
+    };
+
+    if (action === "offer_resign") {
+      // Bu el için pes teklifi: 1 puan ya da mars (2 puan). Rakip onaylarsa el biter.
+      const pts = Number(body.points) === 2 ? 2 : 1;
+      if (st.resignOffer && st.resignOffer.by === p) return fail("Teklifin zaten bekliyor");
+      st.resignOffer = { by: p, points: pts, at: new Date().toISOString() };
+      st.resignRejected = null;
+      notes.push({ to: [opp], title: "Tavla · pes teklifi", body: `${nameOf(uid)} bu eli bırakmak istiyor (${pts === 2 ? "mars, 2 puan" : "1 puan"}). Kabul ediyor musun?` });
+    } else if (action === "cancel_resign") {
+      if (!st.resignOffer || st.resignOffer.by !== p) return fail("Bekleyen teklifin yok");
+      st.resignOffer = null;
+    } else if (action === "answer_resign") {
+      const off = st.resignOffer;
+      if (!off || off.by === p) return fail("Cevaplanacak teklif yok");
+      if (body.accept) {
+        st.last = { by: off.by, handResign: true, points: off.points };
+        finishHand(p, off.points, "pes");
+      } else {
+        st.resignOffer = null;
+        st.resignRejected = { by: off.by, points: off.points };
+        notes.push({ to: [opp], title: "Tavla", body: `${nameOf(uid)} pes teklifini reddetti, oyun sürüyor` });
+      }
+    } else if (action === "resign") {
       g.status = "finished";
       g.winner = opp;
       st.last = { by: p, resign: true };
@@ -68,6 +113,7 @@ Deno.serve(async (req) => {
       if (st.turn !== p) return fail("Sıra sende değil");
       if (action === "roll") {
         if (st.dice?.length) return fail("Zar zaten atıldı");
+        st.resignRejected = null;
         const a = rollDie(), b = rollDie();
         st.roll = [a, b];
         st.dice = T.rollToDice(a, b);
@@ -89,22 +135,7 @@ Deno.serve(async (req) => {
         st.dice = [];
         const res = T.handResult(st, p);
         if (res) {
-          st.score[p] += res.points;
-          const sc = `${st.score[0]}–${st.score[1]}`;
-          if (st.score[p] >= g.match_to) {
-            g.status = "finished";
-            g.winner = uid;
-            const mine = st.score[p], theirs = st.score[1 - p];
-            system = `${nameOf(uid)} tavlada ${nameOf(opp)}'yi ${mine}–${theirs} yendi`;
-            notes.push({ to: [opp], title: "Tavla bitti", body: `${nameOf(uid)} maçı ${mine}–${theirs} kazandı` });
-          } else {
-            const fresh = T.newBoard();
-            st.board = fresh.board; st.bar = fresh.bar; st.off = fresh.off;
-            st.hand = (st.hand ?? 1) + 1;
-            st.turn = 1 - p; // eli kaybeden başlar
-            st.lastHand = { winner: p, points: res.points };
-            notes.push({ to: [opp], title: "Tavla · yeni el", body: `${nameOf(uid)} eli aldı${res.points === 2 ? " (mars!)" : ""}. Skor ${sc}, sıra sende` });
-          }
+          finishHand(p, res.points, "oyun");
         } else {
           st.turn = 1 - p;
           notes.push({ to: [opp], title: "Tavla · sıra sende", body: `${nameOf(uid)} oynadı` });
