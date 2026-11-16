@@ -316,11 +316,18 @@ document.addEventListener('visibilitychange', () => {
   else stopPresence();
 });
 
+// Sürprizli zar: iki çiftten seçim (sadece seçen oyuncu görebilir)
+async function loadPick() {
+  if (!G.game || G.game.kind !== 'tavla') { G.pickOpts = null; return; }
+  const { data } = await sb.from('tavla_secret').select('opts').eq('game_id', G.game.id).eq('user_id', me()).maybeSingle();
+  G.pickOpts = data?.opts || null;
+}
 async function reloadGame() {
   const { data, error } = await sb.from('games').select('*').eq('id', S.gameId).maybeSingle();
   if (error || !data) { document.getElementById('g-body').innerHTML = '<p class="sub">Oyun bulunamadı.</p>'; return; }
   G.game = data; G.done = []; G.sel = null;
   if (data.kind === 'king') await KU.loadHand(data);
+  else if (data.status === 'active' && data.turn === me() && !data.state?.dice?.length) await loadPick(); else G.pickOpts = null;
   drawGame();
 }
 
@@ -338,6 +345,7 @@ async function call(action, extra = {}) {
       throw new Error(msg);
     }
     if (data?.hata) throw new Error(data.hata);
+    if (data?.pick) await loadPick();
     G.busy = false;
     // Masayı arkadan tazele, oyuncuyu bekletme
     reloadGame().catch(() => {});
@@ -525,6 +533,7 @@ function drawGame() {
     status = `<div class="g-end"><span class="cup">${svg('trophy')}</span>
       <h2>${p === -1 ? `${esc(nameOf(g.winner))} kazandı` : won ? 'Kazandın!' : `${esc(nameOf(g.winner))} kazandı`}</h2>
       <p>${p >= 0 ? `Skor ${mine}–${theirs}` : `Skor ${st.score[0]}–${st.score[1]}`} · ${st.hand || 1} el oynandı</p>
+      ${st.endQuote ? `<blockquote class="end-quote">“${esc(st.endQuote.text)}”<cite>— ${esc(nameOf(st.endQuote.by))}</cite></blockquote>` : ''}
       ${p >= 0 ? `<button class="btn primary" id="g-again">${svg('again')}Rövanş</button>` : ''}
       <button class="btn" id="g-home">Oyunlara dön</button>
       ${p >= 0 ? '<p style="font-size:12px">Rövanşa basınca rakibine davet gider</p>' : ''}</div>`;
@@ -532,6 +541,8 @@ function drawGame() {
   else if (p === -1) status = `<div class="g-status">Sıra ${esc(nameOf(g.players[st.turn]))}'de</div>`;
   else if (!myTurn && oppRolling) status = `<div class="g-status">${esc(nameOf(opp))} ${st.roll ? st.roll.join('-') + ' attı, ' : ''}oynuyor…</div>`;
   else if (!myTurn) status = `<div class="g-status">Sıra ${esc(nameOf(opp))}'de · hamlesini yapınca haber gelecek</div>`;
+  else if (!rolled && G.pickOpts) status = `<div class="pick-box"><b>🎁 İki çift geldi, birini seç</b>
+      <div class="pick-row">${G.pickOpts.map((o, i) => `<button class="pick-opt" data-pick="${i}" ${G.busy ? 'disabled' : ''}>${o.map((d) => dieSvg(d, '')).join('')}</button>`).join('')}</div></div>`;
   else if (!rolled) status = `<button class="btn primary block big" id="g-roll" ${G.busy || G.animating ? 'disabled' : ''}>${svg('dice')}Zar at</button>`;
   else status = `<div class="g-actions">
       <div class="dice">${(() => { const u = usedDice.slice(); return st.dice.map((d) => { const i = u.indexOf(d); if (i >= 0) { u.splice(i, 1); return die(d, true); } return die(d, false); }).join(''); })()}</div>
@@ -582,6 +593,7 @@ function drawGame() {
     G.done = []; G.sel = null; call('answer_resign', { accept: true });
   });
   document.getElementById('g-roll')?.addEventListener('click', () => call('roll'));
+  box.querySelectorAll('[data-pick]').forEach((b) => b.onclick = async () => { const i = +b.dataset.pick; if (await call('pick', { i })) G.pickOpts = null; });
   document.getElementById('g-undo')?.addEventListener('click', () => { G.done.pop(); G.sel = null; drawGame(); });
   document.getElementById('g-send')?.addEventListener('click', () => call('move', { moves: G.done }));
   document.getElementById('g-home')?.addEventListener('click', () => goMain('game'));

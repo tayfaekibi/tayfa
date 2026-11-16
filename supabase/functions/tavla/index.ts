@@ -111,10 +111,31 @@ Deno.serve(async (req) => {
       notes.push({ to: [opp], title: "Tavla", body: `${nameOf(uid)} pes etti, maçı kazandın` });
     } else {
       if (st.turn !== p) return fail("Sıra sende değil");
-      if (action === "roll") {
+      if (action === "roll" || action === "pick") {
         if (st.dice?.length) return fail("Zar zaten atıldı");
         st.resignRejected = null;
-        const a = rollDie(), b = rollDie();
+        // Bir kerelik sürpriz: bu oyuncu bu rakibe karşı iki zar çifti arasından seçer (rakip görmez)
+        const { data: boost } = await db.from("tavla_boost").select("*").eq("user_id", uid).eq("used", false).maybeSingle();
+        const boosted = boost && boost.opp_id === opp && (!boost.game_id || boost.game_id === g.id);
+        let a = 0, b = 0;
+        if (boosted) {
+          if (!boost.game_id) await db.from("tavla_boost").update({ game_id: g.id }).eq("user_id", uid);
+          const { data: sec } = await db.from("tavla_secret").select("opts").eq("game_id", g.id).eq("user_id", uid).maybeSingle();
+          if (action === "roll") {
+            if (!sec) {
+              const opts = [[rollDie(), rollDie()], [rollDie(), rollDie()]];
+              await db.from("tavla_secret").insert({ game_id: g.id, user_id: uid, opts });
+            }
+            return json({ ok: true, pick: true });
+          }
+          const i = Number(body.i) === 1 ? 1 : 0;
+          if (!sec) return fail("Önce zar at");
+          [a, b] = (sec.opts as number[][])[i];
+          await db.from("tavla_secret").delete().eq("game_id", g.id).eq("user_id", uid);
+        } else {
+          if (action === "pick") return fail("Bilinmeyen işlem");
+          a = rollDie(); b = rollDie();
+        }
         st.roll = [a, b];
         st.dice = T.rollToDice(a, b);
         const legal = T.legalSequences(st, p, st.dice);
@@ -141,6 +162,19 @@ Deno.serve(async (req) => {
           notes.push({ to: [opp], title: "Tavla · sıra sende", body: `${nameOf(uid)} oynadı` });
         }
       } else return fail("Bilinmeyen işlem");
+    }
+
+    // Sürpriz maçı bittiyse kapat; sürprizli oyuncu kazandıysa sözünü söylesin
+    if (g.status === "finished") {
+      const { data: bst } = await db.from("tavla_boost").select("*").eq("game_id", g.id).eq("used", false).maybeSingle();
+      if (bst) {
+        await db.from("tavla_boost").update({ used: true }).eq("user_id", bst.user_id);
+        await db.from("tavla_secret").delete().eq("game_id", g.id);
+        if (g.winner === bst.user_id && bst.quote) {
+          st.endQuote = { by: bst.user_id, text: bst.quote };
+          system = `${system ? system + " · " : ""}${nameOf(bst.user_id)}: “${bst.quote}”`;
+        }
+      }
     }
 
     const now = new Date().toISOString();
