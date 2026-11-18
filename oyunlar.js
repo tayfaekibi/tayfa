@@ -378,7 +378,7 @@ function gameMenu() {
   }
   const playing = g.players.includes(me()) && g.status === 'active';
   openSheet(`${sheetHead('Tavla')}
-    <p class="sub" style="line-height:1.5">Zarlar sunucuda atılır, hamleler kurallara göre kontrol edilir. Mars 2 sayı. Vurkaç yok: rakibi vuran taş o tur devam edemez. Eli kaybeden yeni ele başlar.</p>
+    <p class="sub" style="line-height:1.5">Zarlar sunucuda atılır, hamleler kurallara göre kontrol edilir. Mars 2 sayı. Evde vurkaç yok: kendi evinde rakibi vuran taş o tur yerinden kalkamaz, evin dışında serbest. Eli kaybeden yeni ele başlar.</p>
     ${playing ? `<button class="btn block" id="g-hand-resign">Bu eli bırak (pes)</button>
       <button class="btn block danger" id="g-resign">Maçı tamamen bırak</button>` : ''}
     <button class="btn block" data-close>Kapat</button>`, () => {

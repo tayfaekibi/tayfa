@@ -72,7 +72,7 @@ const moveKey = (m) => `${m.from}>${m.to}:${m.die}`;
 const seqKey = (seq) => seq.map(moveKey).join(',');
 
 // Zarların tamamı (ya da mümkün olan en fazlası) kullanılarak yapılabilecek bütün hamle dizileri.
-// Vurkaç yok: rakibi vuran taş o tur içinde yoluna devam edemez (vurduğu yerden başka hamle yapılamaz).
+// Evde vurkaç yok: kendi evinde (son 6 hane) rakibi vuran taş o tur yerinden kalkamaz. Evin dışında vurkaç serbest.
 export function legalSequences(s, p, dice) {
   const all = [];
   let maxLen = 0;
@@ -88,7 +88,7 @@ export function legalSequences(s, p, dice) {
       for (const m of singleMoves(state, p, d)) {
         if (m.from !== 'bar' && hitAt.has(m.from)) continue;
         moved = true;
-        const hit = m.to !== 'off' && oppCount(m.to, p, state) === 1;
+        const hit = m.to !== 'off' && isHome(m.to, p) && oppCount(m.to, p, state) === 1;
         const nextHit = hit ? new Set(hitAt).add(m.to) : hitAt;
         walk(applyMove(state, p, m), rest, seq.concat([m]), nextHit);
       }
