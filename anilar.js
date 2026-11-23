@@ -27,6 +27,38 @@ function addKindToggle(wrap, m) {
   b.onclick = (e) => { e.stopPropagation(); const k = mapKind() === 'uydu' ? 'yol' : 'uydu'; setMapKind(k); m.setStyle(styleFor(k)); label(); };
   wrap.appendChild(b);
 }
+// Canlı konum: haritada mavi nokta (sadece bu telefonda görünür, hiçbir yere kaydedilmez)
+function addLiveLocation(ml, m, wrap, onFix) {
+  if (!navigator.geolocation) return;
+  const b = document.createElement('button');
+  b.className = 'map-me'; b.setAttribute('aria-label', 'Konumumu göster');
+  b.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>';
+  wrap.appendChild(b);
+  let watch = null, dot = null, first = true, last = null;
+  const stop = () => { if (watch != null) navigator.geolocation.clearWatch(watch); watch = null; b.classList.remove('on', 'wait'); };
+  b.onclick = (e) => {
+    e.stopPropagation();
+    if (watch != null) { // açıkken basınca konuma tekrar git
+      if (last) m.flyTo({ center: [last.lng, last.lat], zoom: Math.max(m.getZoom(), 15), duration: 600 });
+      return;
+    }
+    b.classList.add('wait'); first = true;
+    watch = navigator.geolocation.watchPosition((pos) => {
+      if (!document.body.contains(m.getContainer())) { stop(); return; }
+      last = { lng: pos.coords.longitude, lat: pos.coords.latitude };
+      b.classList.remove('wait'); b.classList.add('on');
+      if (!dot) {
+        const el = document.createElement('div'); el.className = 'me-dot';
+        dot = new ml.Marker({ element: el }).setLngLat([last.lng, last.lat]).addTo(m);
+      } else dot.setLngLat([last.lng, last.lat]);
+      if (first) { first = false; m.flyTo({ center: [last.lng, last.lat], zoom: Math.max(m.getZoom(), 15), duration: 700 }); }
+      onFix?.(last);
+    }, (err) => {
+      stop();
+      toast(err.code === 1 ? 'Konum izni verilmedi. iPhone Ayarlar → Gizlilik → Konum Servisleri bölümünden izin verebilirsin.' : 'Konum alınamadı, biraz sonra tekrar dene');
+    }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
+  };
+}
 const MAPLIBRE = 'vendor/maplibre-gl';
 const TR_CENTER = [35.2, 39.0];
 
@@ -147,6 +179,7 @@ async function drawMap() {
   if (map) { try { map.remove(); } catch (_) { /* */ } }
   map = new ml.Map({ container: 'map', style: styleFor(mapKind()), center: TR_CENTER, zoom: 4.6, attributionControl: { compact: true } }); attribI(map);
   addKindToggle(box.querySelector('.map-wrap'), map);
+  addLiveLocation(ml, map, box.querySelector('.map-wrap'));
   map.touchPitch?.disable?.(); map.dragRotate.disable(); map.touchZoomRotate.disableRotation();
   map.on('load', () => map.resize());
   setTimeout(() => map && map.resize(), 300);
@@ -750,6 +783,7 @@ export async function pickLocation(album, onPick) {
     <div id="pick-known"></div>
     <p class="sub" id="pick-hint">Haritada yerine dokun ya da daha önce kullanılan bir yeri seç.</p>
     <div class="map-wrap" style="height:46vh"><div id="pick-map" class="map"></div></div>
+    <button class="btn block hidden" id="pick-here">📍 Bulunduğum yeri seç</button>
     <button class="btn primary block" id="pick-ok" disabled>Bu konumu kullan</button>`, async () => {
     let ml; try { ml = await loadMapLibre(); } catch (e) { toast(errText(e)); return; }
     const center = album.lat != null ? [album.lng, album.lat] : TR_CENTER;
@@ -765,6 +799,15 @@ export async function pickLocation(album, onPick) {
       const h = document.getElementById('pick-hint');
       if (h) h.textContent = label ? `Seçilen yer: ${label}` : 'Haritada seçtiğin nokta kullanılacak.';
       if (fly) m.flyTo({ center: [ll.lng, ll.lat], zoom: Math.max(m.getZoom(), 13), duration: 600 });
+    };
+    let here = null;
+    addLiveLocation(ml, m, document.getElementById('pick-map').parentElement, (fix) => {
+      here = fix; document.getElementById('pick-here')?.classList.remove('hidden');
+    });
+    document.getElementById('pick-here').onclick = () => {
+      if (!here) return;
+      document.querySelectorAll('[data-kp]').forEach((x) => x.classList.remove('on'));
+      choose(here, 'Bulunduğun yer', true);
     };
     m.on('click', (e) => {
       choose(e.lngLat, null, false);
