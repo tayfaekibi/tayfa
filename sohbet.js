@@ -749,8 +749,37 @@ export function gameChatIncoming(m) {
   decrypt(m).then(() => {
     GC.list.push(m);
     if (document.getElementById('gc-list')) { drawGC(true); markGCSeen(); }
+    else if (m.sender !== me()) tableBubble(m);
     GC.onChange?.();
   });
+}
+
+// Oyun ekranındayken gelen masa mesajı tahtanın/masanın ortasında balon olarak görünür
+const TB = { q: [], busy: false };
+function tableBubble(m) {
+  TB.q.push(m);
+  if (!TB.busy) nextBubble();
+}
+function nextBubble() {
+  const m = TB.q.shift();
+  if (!m) { TB.busy = false; return; }
+  const host = document.querySelector('.k-table, .board');
+  if (!host || document.getElementById('gc-list')) { TB.q = []; TB.busy = false; return; }
+  TB.busy = true;
+  const r = host.getBoundingClientRect();
+  const full = gcText(m);
+  const txt = full.length > 120 ? full.slice(0, 118) + '…' : full;
+  const d = document.createElement('button');
+  d.className = 'tb-bubble';
+  d.innerHTML = `${avatar(nameOf(m.sender), m.sender)}<span><b>${esc(nameOf(m.sender).split(' ')[0])}</b>${esc(txt)}</span>`;
+  d.style.left = `${r.left + r.width / 2}px`; d.style.top = `${r.top + r.height / 2}px`;
+  d.onclick = () => { d.remove(); document.getElementById('g-chat')?.click(); };
+  document.body.appendChild(d);
+  navigator.vibrate?.(15);
+  setTimeout(() => {
+    d.classList.add('out');
+    setTimeout(() => { d.remove(); nextBubble(); }, 350);
+  }, 4000);
 }
 
 const gcText = (m) => { const p = C.plain.get(m.id) || {}; return m.kind === 'voice' ? '🎤 Sesli mesaj' : p.t || '🔒'; };
