@@ -6,7 +6,7 @@ import {
 import * as T from './supabase/functions/_shared/tavla.js';
 import * as Sohbet from './sohbet.js';
 import * as KU from './kingui.js';
-import * as Bot from './bot.js';
+import { BOT_IDS, isBot } from './supabase/functions/_shared/botai.js';
 
 const G = { games: [], game: null, channel: null, done: [], sel: null, busy: false, view0: null, anim: null, animating: false, rollSeen: undefined };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -116,7 +116,7 @@ function drawTab() {
   const BEST = [['tavla', 'Tavla', 'tavla'], ['king', 'King', 'crown'], ['batak', 'Batak', 'spade'], ['okey', 'Okey', 'tile']];
   const best = BEST.map(([k, n, ic]) => {
     const wins = {};
-    G.games.filter((g) => g.kind === k && g.status === 'finished' && g.winner && new Date(g.finished_at) >= monthStart)
+    G.games.filter((g) => g.kind === k && g.status === 'finished' && g.winner && !isBot(g.winner) && new Date(g.finished_at) >= monthStart)
       .forEach((g) => { wins[g.winner] = (wins[g.winner] || 0) + 1; });
     return { k, n, ic, soon: k === 'batak' || k === 'okey', top: Object.entries(wins).sort((a, b) => b[1] - a[1]).slice(0, 3) };
   });
@@ -166,14 +166,7 @@ function drawTab() {
     <section class="champ"><div class="champ-h"><b>Bu ayın şampiyonları</b>${svg('trophy')}</div>
       <div class="champ-g c${champCols}">${live.map(champ).join('')}</div></section>
     <div class="gm-grid c${gameCols}">${GAMES.map(gameCard).join('')}</div>
-    <section class="card bot-card"><h2>🤖 Bota karşı antrenman</h2>
-      <p class="small" style="margin:0 0 10px">Telefonunda oynanır, kimseye bildirim gitmez, tabloya sayılmaz. Botlar zor oynar.</p>
-      <div class="bot-row">
-        <button class="bot-btn" data-bot="tavla"><span class="game-ic tavla">${svg('tavla')}</span><span><b>Tavla</b><small>${Bot.hasSaved('tavla', me()) ? 'Devam et' : "Kaptan'a karşı"}</small></span></button>
-        <button class="bot-btn" data-bot="king"><span class="game-ic king">${svg('crown')}</span><span><b>King</b><small>${Bot.hasSaved('king', me()) ? 'Devam et' : '3 bota karşı'}</small></span></button>
-      </div></section>
     ${othersActive.length ? `<section class="card"><h2>Gruptaki diğer maçlar</h2>${othersActive.map(row).join('')}</section>` : ''}`;
-  box.querySelectorAll('[data-bot]').forEach((b) => b.onclick = () => openGame('bot-' + b.dataset.bot));
   box.querySelectorAll('[data-game]').forEach((b) => b.onclick = () => openGame(b.dataset.game));
   document.getElementById('new-tavla').onclick = pickOpponent;
   document.getElementById('new-king').onclick = pickKing;
@@ -182,8 +175,8 @@ function drawTab() {
 function pickOpponent() {
   const list = activeMembers().filter((m) => m.user_id !== me());
   openSheet(`${sheetHead('Kimle oynayacaksın?')}
-    ${list.length ? list.map((m) => `<button class="game-row" data-opp="${m.user_id}">${avatar(m.display_name, m.user_id, 'lg')}<div class="grow name">${esc(m.display_name)}</div>${svg('chev')}</button>`).join('')
-      : '<p class="sub">Grupta henüz başka üye yok.</p>'}
+    ${list.map((m) => `<button class="game-row" data-opp="${m.user_id}">${avatar(m.display_name, m.user_id, 'lg')}<div class="grow name">${esc(m.display_name)}</div>${svg('chev')}</button>`).join('')}
+    <button class="game-row" data-opp="${BOT_IDS[0]}">${avatar('Kaptan', BOT_IDS[0], 'lg')}<div class="grow"><div class="name">🤖 Kaptan</div><div class="small">Bot · zor oynar</div></div>${svg('chev')}</button>
     <div class="field"><label for="match-to">Kaç sayılık maç?</label>
       <select class="input" id="match-to"><option value="1">1 el</option><option value="3">3 sayı</option><option value="5" selected>5 sayı</option><option value="7">7 sayı</option></select></div>`, () => {
     document.querySelectorAll('[data-opp]').forEach((b) => b.onclick = async () => {
@@ -199,12 +192,14 @@ function pickOpponent() {
 function pickKing() {
   const list = activeMembers().filter((m) => m.user_id !== me());
   const picked = new Set();
-  const draw = () => `${sheetHead('King masası aç')}
-    <p class="sub">Seninle oynayacak 3 kişiyi seç.</p>
-    ${list.length >= 3 ? list.map((m) => `<button class="game-row ${picked.has(m.user_id) ? 'picked-row' : ''}" data-kp="${m.user_id}">${avatar(m.display_name, m.user_id, 'lg')}<div class="grow name">${esc(m.display_name)}</div>
-      <span class="check ${picked.has(m.user_id) ? 'on' : ''}">${picked.has(m.user_id) ? svg('check') : ''}</span></button>`).join('')
-      : '<p class="sub">King için grupta en az 4 kişi olmalı.</p>'}
-    <button class="btn primary block" id="kp-go" ${picked.size === 3 ? '' : 'disabled'}>${picked.size === 3 ? 'Masayı aç' : `${3 - picked.size} kişi daha seç`}</button>`;
+  const draw = () => {
+    const bots = 3 - picked.size;
+    return `${sheetHead('King masası aç')}
+    <p class="sub">En fazla 3 kişi seç. Boş kalan koltuklara bot oturur (Kaptan, Lodos, Poyraz).</p>
+    ${list.map((m) => `<button class="game-row ${picked.has(m.user_id) ? 'picked-row' : ''}" data-kp="${m.user_id}">${avatar(m.display_name, m.user_id, 'lg')}<div class="grow name">${esc(m.display_name)}</div>
+      <span class="check ${picked.has(m.user_id) ? 'on' : ''}">${picked.has(m.user_id) ? svg('check') : ''}</span></button>`).join('')}
+    <button class="btn primary block" id="kp-go">${bots ? `Masayı aç · ${picked.size ? `${picked.size} kişi + ` : ''}${bots} bot 🤖` : 'Masayı aç'}</button>`;
+  };
   const bind = () => {
     document.querySelectorAll('[data-kp]').forEach((b) => b.onclick = () => {
       const u = b.dataset.kp;
@@ -242,17 +237,6 @@ export async function renderGame() {
   document.getElementById('g-menu').onclick = gameMenu;
   drawChatCount();
   G.rollSeen = undefined; G.view0 = null; G.anim = null; G.animating = false;
-  if (Bot.isLocalGame(S.gameId)) { // bota karşı: sunucu, sohbet, bildirim yok
-    G.local = true;
-    const kind = S.gameId.slice(4);
-    G.game = Bot.load(kind, me()) || Bot.newGame(kind, me());
-    if (G.game.status !== 'active') G.game = Bot.newGame(kind, me());
-    G.done = []; G.sel = null;
-    if (kind === 'king') await KU.loadHand(G.game);
-    drawGame(); runBots();
-    return;
-  }
-  G.local = false;
   startPresence(S.gameId);
   await reloadGame();
   startPoll();
@@ -287,7 +271,6 @@ export async function renderGame() {
 // Canlı bağlantı koparsa (iPhone arka plandan dönünce sık olur) oyunu düzenli olarak sunucudan tazele
 let pollT = null;
 async function pollGame() {
-  if (G.local) return;
   if (S.view !== 'game' || !G.game || document.visibilityState !== 'visible' || G.animating) return;
   if (G.busy && Date.now() - (G.busyAt || 0) < 15000) return;
   const { data } = await sb.from('games').select('*').eq('id', G.game.id).maybeSingle();
@@ -304,8 +287,6 @@ function stopPoll() { if (pollT) { clearInterval(pollT); pollT = null; } }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.view === 'game') setTimeout(pollGame, 300); });
 
 export function closeGame() {
-  clearTimeout(G.botT); G.botT = null;
-  if (G.local) { G.local = false; return; }
   stopPoll();
   KU.stopVoice();
   if (G.channel) { sb.removeChannel(G.channel); G.channel = null; }
@@ -333,7 +314,7 @@ function stopPresence(silent) {
   if (!silent) rpc('set_presence', { p_game: null }).catch(() => {});
 }
 document.addEventListener('visibilitychange', () => {
-  if (S.view !== 'game' || G.local) return;
+  if (S.view !== 'game') return;
   if (document.visibilityState === 'visible') startPresence(S.gameId);
   else stopPresence();
 });
@@ -345,7 +326,6 @@ async function loadPick() {
   G.pickOpts = data?.opts || null;
 }
 async function reloadGame() {
-  if (G.local) { if (G.game?.kind === 'king') await KU.loadHand(G.game); drawGame(); return; }
   const { data, error } = await sb.from('games').select('*').eq('id', S.gameId).maybeSingle();
   if (error || !data) { document.getElementById('g-body').innerHTML = '<p class="sub">Oyun bulunamadı.</p>'; return; }
   G.game = data; G.done = []; G.sel = null;
@@ -355,14 +335,6 @@ async function reloadGame() {
 }
 
 async function call(action, extra = {}) {
-  if (G.local) {
-    try { Bot.act(G.game, me(), action, extra); }
-    catch (e) { toast(errText(e)); drawGame(); return false; }
-    G.done = []; G.sel = null;
-    if (G.game.kind === 'king') await KU.loadHand(G.game);
-    drawGame(); runBots();
-    return true;
-  }
   // Önceki istek takılı kaldıysa (iPhone arka plana alınınca olabiliyor) 15 sn sonra kilidi aç
   if (G.busy && Date.now() - (G.busyAt || 0) < 15000) return false;
   G.busy = true; G.busyAt = Date.now(); drawGame();
@@ -409,7 +381,7 @@ function gameMenu() {
   }
   const playing = g.players.includes(me()) && g.status === 'active';
   openSheet(`${sheetHead('Tavla')}
-    <p class="sub" style="line-height:1.5">${g.local ? 'Antrenman: bota karşı, telefonunda oynanır.' : 'Zarlar sunucuda atılır, hamleler kurallara göre kontrol edilir.'} Mars 2 sayı. Evde vurkaç yok: kendi evinde rakibi vuran taş o tur yerinden kalkamaz, evin dışında serbest. Eli kaybeden yeni ele başlar.</p>
+    <p class="sub" style="line-height:1.5">Zarlar sunucuda atılır, hamleler kurallara göre kontrol edilir. Mars 2 sayı. Evde vurkaç yok: kendi evinde rakibi vuran taş o tur yerinden kalkamaz, evin dışında serbest. Eli kaybeden yeni ele başlar.</p>
     ${playing ? `<button class="btn block" id="g-hand-resign">Bu eli bırak (pes)</button>
       <button class="btn block danger" id="g-resign">Maçı tamamen bırak</button>` : ''}
     <button class="btn block" data-close>Kapat</button>`, () => {
@@ -440,50 +412,11 @@ function handResignSheet() {
   });
 }
 
-// Bot hamleleri: biraz düşünüyormuş gibi bekleyip oynar
-function runBots() {
-  clearTimeout(G.botT);
-  const g = G.game;
-  if (!G.local || !g || g.status !== 'active' || S.view !== 'game') return;
-  const st = g.state;
-  let wait = 0;
-  if (g.kind === 'tavla') {
-    if (!Bot.isBot(g.players[st.turn])) return;
-    wait = st.dice?.length ? 1100 : 750;
-  } else {
-    const who = st.phase === 'choose' ? st.chooser : st.turn;
-    if (!Bot.isBot(g.players[who])) return;
-    wait = st.phase === 'choose' ? 1300 : (!st.trick.length && st.tricksDone > 0 ? 1500 : 800);
-  }
-  G.botT = setTimeout(() => {
-    if (!G.local || S.view !== 'game' || G.game !== g) return;
-    if (G.animating) { runBots(); return; }
-    const r = Bot.botStep(g);
-    if (!r) return;
-    if (g.kind === 'tavla') {
-      const last = g.state.last;
-      const meIdx = Math.max(0, g.players.indexOf(me()));
-      if (r.kind === 'move' && last?.moves?.length && Bot.isBot(g.players[last.by])) {
-        G.anim = { start: { board: r.prev.board, bar: r.prev.bar, off: r.prev.off }, moves: last.moves, by: last.by, meIdx };
-        G.done = []; G.sel = null;
-        playOppAnim().then(() => runBots());
-        return;
-      }
-      G.done = []; G.sel = null;
-      drawGame();
-    } else {
-      KU.loadHand(g).then(drawGame);
-    }
-    runBots();
-  }, wait);
-}
-
 function drawChatBar() {
-  if (G.local) { const b = document.getElementById('g-chatbar'); if (b) b.innerHTML = '<p class="small bot-note">🤖 Antrenman · bota karşı</p>'; return; }
   const box = document.getElementById('g-chatbar'); if (!box || !G.game) return;
   const { last, unread } = Sohbet.gameChatSummary();
   const g = G.game;
-  const wait = g.status === 'active' && g.turn && g.turn !== me() && g.players.includes(me()) ? Date.now() - new Date(g.updated_at).getTime() : 0;
+  const wait = g.status === 'active' && g.turn && g.turn !== me() && !isBot(g.turn) && g.players.includes(me()) ? Date.now() - new Date(g.updated_at).getTime() : 0;
   const canNudge = wait > 2 * 60 * 1000;
   box.innerHTML = `<div class="gc-row"><button class="gc-bar" id="g-chat">${svg('chat')}<span class="grow">${last ? esc(last) : g.kind === 'king' ? 'Masayla sohbet et' : 'Rakibinle sohbet et'}</span>${unread ? `<b class="gc-n">${unread}</b>` : ''}</button>
     ${canNudge ? `<button class="nudge-btn" id="g-nudge" aria-label="${esc(nameOf(g.turn).split(' ')[0])} adlı oyuncuyu dürt">👉 Dürt</button>` : ''}</div>`;
@@ -518,6 +451,19 @@ function sumTargets(legal, done, sel) {
   if (isDouble) { const max = Math.max(...res.map((r) => r.seq.length)); return res.filter((r) => r.seq.length === max); }
   return res;
 }
+
+// Sıra botta ama bir süredir hareket yoksa (örn. masa yeni açıldı, bot başlıyor) sunucuya "bot oynasın" de
+function kickBot(g) {
+  if (!g || g.status !== 'active' || !g.players.includes(me())) return;
+  const st = g.state;
+  const who = g.kind === 'king' ? g.players[st.phase === 'choose' ? st.chooser : st.turn] : g.players[st.turn];
+  if (!isBot(who)) return;
+  const idle = Date.now() - new Date(g.updated_at).getTime();
+  if (idle < 4000 || Date.now() - (G.kickAt || 0) < 12000) return;
+  G.kickAt = Date.now();
+  sb.functions.invoke(g.kind === 'king' ? 'king' : 'tavla', { body: { action: 'bot', game_id: g.id } }).catch(() => {});
+}
+setInterval(() => { if (S.view === 'game' && G.game && document.visibilityState === 'visible') kickBot(G.game); }, 5000);
 
 function drawGame() {
   const box = document.getElementById('g-body'); const g = G.game;
@@ -691,7 +637,6 @@ function drawGame() {
 // Rövanş: aynı rakiple, aynı uzunlukta yeni maç
 async function rematch() {
   const g = G.game; if (!g) return;
-  if (G.local) { G.game = Bot.newGame(g.kind, me()); G.done = []; G.sel = null; G.rollSeen = undefined; if (g.kind === 'king') await KU.loadHand(G.game); drawGame(); runBots(); return; }
   const opp = g.players.find((u) => u !== me());
   const btn = document.getElementById('g-again'); if (btn) btn.disabled = true;
   try {

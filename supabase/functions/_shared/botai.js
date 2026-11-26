@@ -1,174 +1,11 @@
-// Bota karşı antrenman: oyun tamamen telefonda oynanır (sunucu, bildirim, sohbet, istatistik yok).
-// Kurallar gerçek oyunla aynı modüllerden gelir (_shared/tavla.js, _shared/king.js).
-import * as T from './supabase/functions/_shared/tavla.js';
-import * as K from './supabase/functions/_shared/king.js';
+// Botların yapay zekâsı — hem sunucu (Edge Function) hem uygulama aynı dosyayı kullanır.
+import * as T from './tavla.js';
+import * as K from './king.js';
 
-export const BOT_NAMES = { 'bot-kaptan': 'Kaptan', 'bot-lodos': 'Lodos', 'bot-poyraz': 'Poyraz' };
-export const isBot = (id) => typeof id === 'string' && id.startsWith('bot-');
-export const isLocalGame = (id) => typeof id === 'string' && id.startsWith('bot-');
-const KEY = (kind) => 'tayfa-bot-' + kind;
-const rnd = (n) => Math.floor(Math.random() * n);
-const die = () => 1 + rnd(6);
-let tick = 0;
-const stamp = () => new Date(Date.now() + (tick++ % 1000)).toISOString();
-
-// ------------------------------------------------------------------ kayıt
-export function load(kind, me) {
-  try {
-    const g = JSON.parse(localStorage.getItem(KEY(kind)) || 'null');
-    if (g && g.players?.[0] === me) return fix(g);
-  } catch (_) { /* */ }
-  return null;
-}
-export function save(g) { try { localStorage.setItem(KEY(g.kind), JSON.stringify(g)); } catch (_) { /* */ } }
-export function hasSaved(kind, me) { const g = load(kind, me); return !!g && g.status === 'active'; }
-
-export function newGame(kind, me) {
-  const g = fix(kind === 'king' ? newKing(me) : newTavla(me));
-  save(g);
-  return g;
-}
-function newTavla(me) {
-  const b = T.newBoard();
-  const starter = rnd(2);
-  return {
-    id: 'bot-tavla', kind: 'tavla', local: true, players: [me, 'bot-kaptan'], status: 'active', winner: null,
-    match_to: 5, created_by: me, updated_at: stamp(),
-    state: { board: b.board, bar: b.bar, off: b.off, turn: starter, dice: [], score: [0, 0], hand: 1 },
-  };
-}
-function newKing(me) {
-  const starter = rnd(4);
-  return {
-    id: 'bot-king', kind: 'king', local: true, players: [me, 'bot-kaptan', 'bot-lodos', 'bot-poyraz'], status: 'active', winner: null,
-    match_to: 20, created_by: me, updated_at: stamp(), state: K.newState(starter), hands: K.deal(rnd),
-  };
-}
-// JSON'dan gelen oyunlarda "turn" alanını yeniden hesapla
-export function fix(g) {
-  if (!g) return g;
-  Object.defineProperty(g, 'turn', { configurable: true, enumerable: false, get() { return this.status === 'active' ? this.players[this.state.turn] : null; } });
-  return g;
-}
-
-// ------------------------------------------------------------------ hamleler (sunucudaki kurallarla aynı)
-export function act(g, uid, action, body = {}) {
-  const r = g.kind === 'king' ? actKing(g, uid, action, body) : actTavla(g, uid, action, body);
-  g.updated_at = stamp();
-  save(g);
-  return r;
-}
-
-function actTavla(g, uid, action, body) {
-  const st = g.state;
-  const p = g.players.indexOf(uid);
-  if (p < 0) throw new Error('Bu oyunda değilsin');
-  if (g.status !== 'active') throw new Error('Oyun bitti');
-  const finishHand = (w, points, how) => {
-    st.score[w] += points;
-    st.resignOffer = null; st.resignRejected = null; st.dice = []; st.autoPass = null;
-    if (st.score[w] >= g.match_to) { g.status = 'finished'; g.winner = g.players[w]; }
-    else {
-      const fresh = T.newBoard();
-      st.board = fresh.board; st.bar = fresh.bar; st.off = fresh.off;
-      st.hand = (st.hand ?? 1) + 1; st.turn = 1 - w; st.lastHand = { winner: w, points, how };
-    }
-  };
-  if (action === 'offer_resign') {
-    const pts = Number(body.points) === 2 ? 2 : 1;
-    // Bot hemen karar verir
-    if (botAcceptsResign(st, 1 - p, pts)) { st.last = { by: p, handResign: true, points: pts }; finishHand(1 - p, pts, 'pes'); }
-    else { st.resignOffer = null; st.resignRejected = { by: p, points: pts }; }
-  } else if (action === 'cancel_resign') {
-    st.resignOffer = null;
-  } else if (action === 'resign') {
-    g.status = 'finished'; g.winner = g.players[1 - p]; st.last = { by: p, resign: true };
-  } else {
-    if (st.turn !== p) throw new Error('Sıra sende değil');
-    if (action === 'roll') {
-      if (st.dice?.length) throw new Error('Zar zaten atıldı');
-      st.resignRejected = null;
-      if (st.autoPass?.by === p) st.autoPass = null;
-      const a = die(), b = die();
-      st.roll = [a, b]; st.dice = T.rollToDice(a, b);
-      if (T.legalSequences(st, p, st.dice).maxLen === 0) {
-        st.last = { by: p, roll: [a, b], moves: [], pass: true }; st.dice = []; st.turn = 1 - p;
-      }
-    } else if (action === 'move') {
-      if (!st.dice?.length) throw new Error('Önce zar at');
-      const seq = body.moves ?? [];
-      const legal = T.legalSequences(st, p, st.dice);
-      if (!T.isLegalSequence(legal, seq)) throw new Error('Bu hamle kurallara uygun değil');
-      const next = T.applySequence(st, p, seq);
-      st.board = next.board; st.bar = next.bar; st.off = next.off;
-      st.last = { by: p, roll: st.roll, moves: seq }; st.dice = [];
-      const res = T.handResult(st, p);
-      if (res) finishHand(p, res.points, 'oyun'); else st.turn = 1 - p;
-    } else throw new Error('Bilinmeyen işlem');
-  }
-  // Kapalı eve giremeyecek oyuncuya boşuna zar attırma
-  if (g.status === 'active' && !st.dice?.length) {
-    const t = st.turn;
-    if (T.entryBlocked(st, t) && !T.entryBlocked(st, 1 - t)) { st.autoPass = { by: t }; st.turn = 1 - t; }
-  }
-  return true;
-}
-
-function actKing(g, uid, action, body) {
-  const st = g.state;
-  const seat = g.players.indexOf(uid);
-  if (seat < 0) throw new Error('Bu oyunda değilsin');
-  if (g.status !== 'active') throw new Error('Oyun bitti');
-  if (action === 'close') { g.status = 'abandoned'; return true; }
-  if (action === 'choose') { K.applyChoice(st, seat, body.type, body.trump); return true; }
-  if (action === 'play') {
-    if (st.phase !== 'play') throw new Error('Önce el seçilmeli');
-    if (st.turn !== seat) throw new Error('Sıra sende değil');
-    const hand = g.hands[seat];
-    const card = String(body.card || '');
-    if (!hand.includes(card)) throw new Error('Bu kart elinde yok');
-    if (!K.legalCards(st, hand).includes(card)) throw new Error('Bu kartı şimdi oynayamazsın');
-    g.hands[seat] = hand.filter((c) => c !== card);
-    const r = K.applyPlay(st, seat, card);
-    if (r.gameDone) {
-      g.status = 'finished';
-      const best = Math.max(...st.score); g.winner = g.players[st.score.indexOf(best)];
-    } else if (r.handDone) g.hands = K.deal(rnd);
-    return r;
-  }
-  throw new Error('Bilinmeyen işlem');
-}
-
-// ------------------------------------------------------------------ botun sırası: bir adım oyna
-// Döner: null (botun işi yok) ya da { prev } (önceki durum, animasyon için)
-export function botStep(g) {
-  if (!g || g.status !== 'active') return null;
-  const prev = JSON.parse(JSON.stringify(g.state));
-  if (g.kind === 'tavla') {
-    const st = g.state, t = st.turn, uid = g.players[t];
-    if (!isBot(uid)) return null;
-    if (!st.dice?.length) { act(g, uid, 'roll'); return { prev, kind: 'roll' }; }
-    const seq = bestTavlaSequence(st, t, st.dice);
-    act(g, uid, 'move', { moves: seq });
-    return { prev, kind: 'move' };
-  }
-  const st = g.state;
-  if (st.phase === 'choose') {
-    const uid = g.players[st.chooser];
-    if (!isBot(uid)) return null;
-    const c = chooseContract(st, st.chooser, g.hands[st.chooser]);
-    act(g, uid, 'choose', c);
-    return { prev, kind: 'choose' };
-  }
-  if (st.phase === 'play') {
-    const uid = g.players[st.turn];
-    if (!isBot(uid)) return null;
-    const card = chooseCard(g, st.turn);
-    const r = act(g, uid, 'play', { card });
-    return { prev, kind: 'play', r };
-  }
-  return null;
-}
+// Bot kimlikleri (oyunlarda gerçek oyuncu gibi yer alırlar, üye değildirler)
+export const BOT_IDS = ['00000000-0000-4000-8000-00000000b001', '00000000-0000-4000-8000-00000000b002', '00000000-0000-4000-8000-00000000b003'];
+export const BOT_NAMES = { [BOT_IDS[0]]: 'Kaptan', [BOT_IDS[1]]: 'Lodos', [BOT_IDS[2]]: 'Poyraz' };
+export const isBot = (id) => BOT_IDS.includes(id);
 
 // ================================================================== TAVLA YAPAY ZEKÂSI
 // Konumları oyuncunun gözünden "kalan mesafe"ye çevir: 0 = toplamaya en yakın hane, 23 = en uzak
@@ -276,7 +113,7 @@ export function bestTavlaSequence(s, p, dice) {
   return best;
 }
 
-function botAcceptsResign(st, botIdx, pts) {
+export function botAcceptsResign(st, botIdx, pts) {
   if (pts === 2) return true;
   // Bot mars yapabileceğini düşünüyorsa 1 puanı reddeder: rakip hiç toplamamış ve yarışta çok gerideyse
   const human = 1 - botIdx;
@@ -306,7 +143,7 @@ function higherOutside(g, seat, card) {
   return false;
 }
 
-function chooseCard(g, seat) {
+export function chooseCard(g, seat) {
   const st = g.state, hand = g.hands[seat];
   const legal = K.legalCards(st, hand);
   if (legal.length === 1) return legal[0];
@@ -379,7 +216,7 @@ function chooseCard(g, seat) {
   return (notWin.length ? notWin : legal).slice().sort((a, b) => danger(b) - danger(a))[0];
 }
 
-function chooseContract(st, seat, hand) {
+export function chooseContract(st, seat, hand) {
   const opts = K.choicesFor(st, seat);
   const cnt = (s) => hand.filter((x) => SU(x) === s).length;
   const high = (s, min) => hand.filter((x) => SU(x) === s && R(x) >= min).length;

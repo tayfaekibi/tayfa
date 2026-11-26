@@ -4,7 +4,7 @@ import * as Anilar from './anilar.js';
 import * as Sohbet from './sohbet.js';
 import * as Oyunlar from './oyunlar.js';
 import * as Quiz from './quiz.js';
-import { BOT_NAMES } from './bot.js';
+import { BOT_NAMES } from './supabase/functions/_shared/botai.js';
 import { ensureDevice } from './e2e.js';
 
 // İstekler asılı kalmasın: iPhone ağ değiştirince (Wi-Fi ↔ mobil) bazen cevap hiç gelmiyor, uygulama donuyordu.
@@ -422,6 +422,7 @@ async function loadData() {
   loadOnThisDay().catch(() => {});
   Quiz.loadQuiz().catch(() => {});
 }
+try { localStorage.removeItem('tayfa-bot-tavla'); localStorage.removeItem('tayfa-bot-king'); } catch (_) { /* eski antrenman kayıtları */ }
 
 // "Geçen yıl bugün": günde bir kez sorulur
 async function loadOnThisDay() {

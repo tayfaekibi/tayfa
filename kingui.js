@@ -1,6 +1,7 @@
 // King masası (4 kişi). Kurallar: supabase/functions/_shared/king.js — sunucu da aynısını kullanır.
 import { sb, S, esc, svg, avatar, toast, errText, openSheet, closeSheet, sheetHead, me, nameOf } from './app.js';
 import * as K from './supabase/functions/_shared/king.js';
+import { isBot } from './supabase/functions/_shared/botai.js';
 import * as Voice from './voice.js';
 
 const KU = { hand: [], gameId: null, sel: null, busy: false, pickType: null, pending: null };
@@ -8,7 +9,6 @@ const KU = { hand: [], gameId: null, sel: null, busy: false, pickType: null, pen
 export async function loadHand(game) {
   if (!game.players.includes(me())) { KU.hand = []; return; }
   const seat = game.players.indexOf(me());
-  if (game.local) { KU.hand = K.sortHand(game.hands[seat] || []); KU.gameId = game.id; return; }
   const { data } = await sb.from('king_hands').select('cards').eq('game_id', game.id).eq('seat', seat).maybeSingle();
   KU.hand = K.sortHand(data?.cards || []);
   KU.gameId = game.id;
@@ -96,7 +96,7 @@ export function draw(game, box, call) {
       <span class="k-tr">${st.tricksDone}/13</span></div>` : '';
 
   box.innerHTML = `
-    ${playing && game.status === 'active' && !game.local ? '<div id="k-voice"></div>' : ''}
+    ${playing && game.status === 'active' ? '<div id="k-voice"></div>' : ''}
     ${banner}
     <div class="k-table ${st.phase === 'choose' && game.status === 'active' ? 'choosing' : ''}">
       ${[0, 1, 2, 3].filter((i) => i !== mine || !playing).map(seatBox).join('')}
@@ -149,12 +149,12 @@ export function draw(game, box, call) {
   box.querySelectorAll('#k-table').forEach((b) => b.onclick = () => scoreSheet(game));
   trickFx(game);
   chosenFx(game);
-  if (playing && game.status === 'active' && !game.local) {
+  if (playing && game.status === 'active') {
     Voice.watch(game.id, game.players, drawVoice);
     Voice.setTreatHandler((p) => showTreat(game, p));
     box.querySelectorAll('[data-seat]').forEach((el) => {
       const u = game.players[+el.dataset.seat];
-      if (u === me()) return;
+      if (u === me() || isBot(u)) return;
       let t = null;
       const start = () => { t = setTimeout(() => { t = null; navigator.vibrate?.(15); treatMenu(u); }, 450); };
       const cancel = () => { if (t) { clearTimeout(t); t = null; } };
