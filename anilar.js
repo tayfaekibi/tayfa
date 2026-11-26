@@ -470,18 +470,9 @@ function openViewer(start, onClose) {
       i = Math.min(i, A.photos.length - 1); draw();
     };
     const stage = document.getElementById('v-stage');
-    let x0 = null;
-    stage.addEventListener('touchstart', (e) => { x0 = e.touches[0].clientX; }, { passive: true });
-    stage.addEventListener('touchend', (e) => {
-      if (x0 == null) return;
-      const dx = e.changedTouches[0].clientX - x0; x0 = null;
-      if (dx < -50 && i < A.photos.length - 1) { i++; draw(); }
-      else if (dx > 50 && i > 0) { i--; draw(); }
-    });
-    stage.addEventListener('click', (e) => {
-      const w = stage.clientWidth;
-      if (e.clientX > w * 0.66 && i < A.photos.length - 1) { i++; draw(); }
-      else if (e.clientX < w * 0.33 && i > 0) { i--; draw(); }
+    bindPhotoZoom(stage, stage.querySelector('.viewer-img'), {
+      next: () => { if (i < A.photos.length - 1) { i++; draw(); } },
+      prev: () => { if (i > 0) { i--; draw(); } },
     });
   };
   draw();
@@ -849,4 +840,79 @@ function attribI(m) {
   const shut = () => m.getContainer().querySelectorAll('.maplibregl-ctrl-attrib.maplibregl-compact-show').forEach((e) => { e.classList.remove('maplibregl-compact-show'); e.removeAttribute('open'); });
   shut(); m.once('load', shut); m.once('idle', shut); setTimeout(shut, 1500);
   m.on('click', shut); m.on('dragstart', shut);
+}
+
+// Fotoğraf ekranında yakınlaştırma: iki parmakla büyüt, büyükken kaydır, çift dokunuşla büyüt/küçült.
+// Sadece fotoğraf büyür (sayfa değil); fotoğraf değişince ya da ekran kapanınca sıfırlanır.
+function bindPhotoZoom(stage, img, nav) {
+  if (!stage || !img) return;
+  const z = { s: 1, x: 0, y: 0 };
+  let pinch = null, pan = null, swipeX = null, moved = false, lastTap = 0, tapT = null;
+  const apply = (anim) => {
+    const w = stage.clientWidth, h = stage.clientHeight;
+    const mx = (w * (z.s - 1)) / 2, my = (h * (z.s - 1)) / 2;
+    z.x = Math.max(-mx, Math.min(mx, z.x)); z.y = Math.max(-my, Math.min(my, z.y));
+    img.style.transition = anim ? 'transform .22s ease' : 'none';
+    img.style.transform = z.s === 1 ? '' : `translate(${z.x}px, ${z.y}px) scale(${z.s})`;
+    stage.classList.toggle('zoomed', z.s > 1);
+  };
+  const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  const mid = (t) => ({ x: (t[0].clientX + t[1].clientX) / 2, y: (t[0].clientY + t[1].clientY) / 2 });
+  const zoomAt = (s, cx, cy) => {
+    const r = stage.getBoundingClientRect();
+    const ox = cx - r.left - r.width / 2, oy = cy - r.top - r.height / 2;
+    // noktayı parmağın altında tut
+    z.x = ox - ((ox - z.x) * s) / z.s; z.y = oy - ((oy - z.y) * s) / z.s; z.s = s;
+  };
+  stage.addEventListener('touchstart', (e) => {
+    moved = false;
+    if (e.touches.length === 2) {
+      pinch = { d: dist(e.touches), s: z.s, m: mid(e.touches) }; pan = null; swipeX = null;
+    } else if (e.touches.length === 1) {
+      const t = e.touches[0];
+      if (z.s > 1) pan = { x: t.clientX, y: t.clientY, zx: z.x, zy: z.y }; else swipeX = t.clientX;
+    }
+  }, { passive: true });
+  stage.addEventListener('touchmove', (e) => {
+    if (pinch && e.touches.length === 2) {
+      e.preventDefault(); moved = true;
+      const s = Math.max(1, Math.min(5, (pinch.s * dist(e.touches)) / pinch.d));
+      const m = mid(e.touches);
+      zoomAt(s, m.x, m.y);
+      z.x += m.x - pinch.m.x; z.y += m.y - pinch.m.y; pinch.m = m;
+      apply(false);
+    } else if (pan && e.touches.length === 1) {
+      e.preventDefault(); moved = true;
+      const t = e.touches[0];
+      z.x = pan.zx + (t.clientX - pan.x); z.y = pan.zy + (t.clientY - pan.y);
+      apply(false);
+    }
+  }, { passive: false });
+  stage.addEventListener('touchend', (e) => {
+    if (pinch && e.touches.length < 2) {
+      pinch = null;
+      if (z.s < 1.05) { z.s = 1; z.x = 0; z.y = 0; apply(true); }
+      if (e.touches.length === 1 && z.s > 1) { const t = e.touches[0]; pan = { x: t.clientX, y: t.clientY, zx: z.x, zy: z.y }; }
+      return;
+    }
+    if (pan && !e.touches.length) { pan = null; }
+    if (swipeX != null && z.s === 1 && !e.touches.length) {
+      const dx = e.changedTouches[0].clientX - swipeX; swipeX = null;
+      if (dx < -50) { moved = true; nav.next(); } else if (dx > 50) { moved = true; nav.prev(); }
+    }
+  });
+  stage.addEventListener('click', (e) => {
+    if (moved) { moved = false; return; }
+    const now = Date.now();
+    if (now - lastTap < 300) { // çift dokunuş
+      clearTimeout(tapT); lastTap = 0;
+      if (z.s > 1) { z.s = 1; z.x = 0; z.y = 0; } else zoomAt(2.5, e.clientX, e.clientY);
+      apply(true);
+      return;
+    }
+    lastTap = now;
+    if (z.s > 1) return;
+    const w = stage.clientWidth, r = stage.getBoundingClientRect(), x = e.clientX - r.left;
+    tapT = setTimeout(() => { if (x > w * 0.66) nav.next(); else if (x < w * 0.33) nav.prev(); }, 300);
+  });
 }

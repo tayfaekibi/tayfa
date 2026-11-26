@@ -1299,6 +1299,11 @@ document.addEventListener('visibilitychange', () => {
   if (S.session) { checkPendingSoon(); refreshAll(); }
 });
 window.addEventListener('hashchange', () => route(location.hash));
+// Sayfa yakınlaştırılamaz (iPhone iki parmak); fotoğraf ekranı ve haritalar kendi yakınlaştırmasını yapar
+const ZOOM_OK = '.viewer-stage, .maplibregl-map, .map';
+document.addEventListener('gesturestart', (e) => { if (!e.target.closest?.(ZOOM_OK)) e.preventDefault(); }, { passive: false });
+document.addEventListener('gesturechange', (e) => { if (!e.target.closest?.(ZOOM_OK)) e.preventDefault(); }, { passive: false });
+document.addEventListener('touchmove', (e) => { if (e.touches.length > 1 && !e.target.closest?.(ZOOM_OK)) e.preventDefault(); }, { passive: false });
 // Basılı tutunca iPhone menüsü çıkmasın (yazı kutuları hariç)
 document.addEventListener('contextmenu', (e) => { if (!e.target.closest?.('input, textarea')) e.preventDefault(); });
 navigator.serviceWorker?.addEventListener('message', (e) => {

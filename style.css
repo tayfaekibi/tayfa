@@ -1010,3 +1010,8 @@ img, a, button { -webkit-touch-callout: none; -webkit-user-drag: none; }
 .bot-btn:active { transform: scale(.98); }
 .bot-note { text-align: center; color: var(--sub); margin: 4px 0; }
 .g-status.warn { color: var(--accent); }
+
+/* Fotoğraf yakınlaştırma */
+.viewer-stage { overflow: hidden; touch-action: none; }
+.viewer-img { transform-origin: center center; will-change: transform; }
+html, body { touch-action: pan-x pan-y; }
