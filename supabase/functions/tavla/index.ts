@@ -114,6 +114,7 @@ Deno.serve(async (req) => {
       if (action === "roll" || action === "pick") {
         if (st.dice?.length) return fail("Zar zaten atıldı");
         st.resignRejected = null;
+        if (st.autoPass?.by === p) st.autoPass = null;
         // Bir kerelik sürpriz: bu oyuncu bu rakibe karşı iki zar çifti arasından seçer (rakip görmez)
         const { data: boost } = await db.from("tavla_boost").select("*").eq("user_id", uid).eq("used", false).maybeSingle();
         const boosted = boost && boost.opp_id === opp && (!boost.game_id || boost.game_id === g.id);
@@ -162,6 +163,18 @@ Deno.serve(async (req) => {
           notes.push({ to: [opp], title: "Tavla · sıra sende", body: `${nameOf(uid)} oynadı` });
         }
       } else return fail("Bilinmeyen işlem");
+    }
+
+    // Sıra kırık taşı olan ve hiç giremeyecek (ev tamamen kapalı) oyuncuya geçtiyse boşuna zar attırma: sıra geri döner
+    if (g.status === "active" && !st.dice?.length) {
+      const t = st.turn;
+      if (T.entryBlocked(st, t) && !T.entryBlocked(st, 1 - t)) {
+        st.autoPass = { by: t, at: new Date().toISOString() };
+        st.turn = 1 - t;
+        for (let i = notes.length - 1; i >= 0; i--) if (notes[i].to.includes(g.players[t]) && notes[i].title.includes("sıra sende")) notes.splice(i, 1);
+        if (g.players[t] !== uid) notes.push({ to: [g.players[t]], title: "Tavla", body: "Kırık taşın var, girecek yer yok · sıra rakibe geçti" });
+        if (g.players[1 - t] !== uid) notes.push({ to: [g.players[1 - t]], title: "Tavla · sıra sende", body: `${nameOf(g.players[t])} giremedi, sıra yine sende` });
+      }
     }
 
     // Sürpriz maçı bittiyse kapat; sürprizli oyuncu kazandıysa sözünü söylesin

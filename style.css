@@ -1001,3 +1001,12 @@ img, a, button { -webkit-touch-callout: none; -webkit-user-drag: none; }
 .tb-bubble span { min-width: 0; overflow-wrap: anywhere; }
 .tb-bubble.out { opacity: 0; transform: translate(-50%, -70%); }
 @keyframes tbIn { from { opacity: 0; transform: translate(-50%, -30%) scale(.7); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
+
+/* Bota karşı antrenman */
+.bot-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.bot-btn { display: flex; align-items: center; gap: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); border-radius: 16px; padding: 10px; text-align: left; font: inherit; }
+.bot-btn .game-ic { width: 38px; height: 38px; border-radius: 12px; flex-shrink: 0; } .bot-btn .game-ic svg { width: 21px; height: 21px; }
+.bot-btn b { display: block; font-size: 15px; } .bot-btn small { font-size: 12px; color: var(--accent); font-weight: 700; }
+.bot-btn:active { transform: scale(.98); }
+.bot-note { text-align: center; color: var(--sub); margin: 4px 0; }
+.g-status.warn { color: var(--accent); }

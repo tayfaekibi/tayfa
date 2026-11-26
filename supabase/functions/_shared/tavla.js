@@ -147,3 +147,10 @@ export function pipCount(s, p) {
   }
   return n;
 }
+
+// Kırık taşı var ve rakibin evindeki 6 hanenin hepsi kapalı mı? (hangi zar gelse giremez)
+export function entryBlocked(s, p) {
+  if (!s.bar?.[p]) return false;
+  for (let d = 1; d <= 6; d++) if (singleMoves(s, p, d).length) return false;
+  return true;
+}

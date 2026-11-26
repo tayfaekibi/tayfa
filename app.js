@@ -4,6 +4,7 @@ import * as Anilar from './anilar.js';
 import * as Sohbet from './sohbet.js';
 import * as Oyunlar from './oyunlar.js';
 import * as Quiz from './quiz.js';
+import { BOT_NAMES } from './bot.js';
 import { ensureDevice } from './e2e.js';
 
 // İstekler asılı kalmasın: iPhone ağ değiştirince (Wi-Fi ↔ mobil) bazen cevap hiç gelmiyor, uygulama donuyordu.
@@ -475,7 +476,7 @@ function fillWeather() {
 }
 const isAdmin = () => S.ctx.role === 'admin' && S.ctx.status === 'active';
 const me = () => S.session?.user?.id;
-const nameOf = (uid) => S.members.find((m) => m.user_id === uid)?.display_name || 'Bir üye';
+const nameOf = (uid) => BOT_NAMES[uid] || S.members.find((m) => m.user_id === uid)?.display_name || 'Bir üye';
 const activeMembers = () => S.members.filter((m) => m.status === 'active');
 const pendingMembers = () => S.members.filter((m) => m.status === 'pending');
 const pendingEvents = () => S.events.filter((e) => e.status === 'pending');

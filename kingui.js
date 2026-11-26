@@ -8,6 +8,7 @@ const KU = { hand: [], gameId: null, sel: null, busy: false, pickType: null, pen
 export async function loadHand(game) {
   if (!game.players.includes(me())) { KU.hand = []; return; }
   const seat = game.players.indexOf(me());
+  if (game.local) { KU.hand = K.sortHand(game.hands[seat] || []); KU.gameId = game.id; return; }
   const { data } = await sb.from('king_hands').select('cards').eq('game_id', game.id).eq('seat', seat).maybeSingle();
   KU.hand = K.sortHand(data?.cards || []);
   KU.gameId = game.id;
@@ -95,7 +96,7 @@ export function draw(game, box, call) {
       <span class="k-tr">${st.tricksDone}/13</span></div>` : '';
 
   box.innerHTML = `
-    ${playing && game.status === 'active' ? '<div id="k-voice"></div>' : ''}
+    ${playing && game.status === 'active' && !game.local ? '<div id="k-voice"></div>' : ''}
     ${banner}
     <div class="k-table ${st.phase === 'choose' && game.status === 'active' ? 'choosing' : ''}">
       ${[0, 1, 2, 3].filter((i) => i !== mine || !playing).map(seatBox).join('')}
@@ -148,7 +149,7 @@ export function draw(game, box, call) {
   box.querySelectorAll('#k-table').forEach((b) => b.onclick = () => scoreSheet(game));
   trickFx(game);
   chosenFx(game);
-  if (playing && game.status === 'active') {
+  if (playing && game.status === 'active' && !game.local) {
     Voice.watch(game.id, game.players, drawVoice);
     Voice.setTreatHandler((p) => showTreat(game, p));
     box.querySelectorAll('[data-seat]').forEach((el) => {
@@ -203,6 +204,7 @@ function showTreat(game, p) {
 // Canlı ses: tek düğmeyle katıl, seste olanlar koltuklarda kulaklıkla görünür, konuşan parlar
 export function drawVoice() {
   const el = document.getElementById('k-voice');
+  if (!el) return;
   const v = Voice.state();
   document.querySelectorAll('[data-vu]').forEach((s) => {
     const u = s.dataset.vu;
